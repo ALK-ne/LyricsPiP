@@ -4,16 +4,10 @@ on:
   workflow_dispatch: {}
   push:
     branches: [main, master]
-    paths:
-      - "LyricsPiP/**"
-      - ".github/workflows/ios-build.yml"
 
 jobs:
   build:
     runs-on: macos-14
-    defaults:
-      run:
-        working-directory: LyricsPiP
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -54,14 +48,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: LyricsPiP-unsigned-ipa
-          path: LyricsPiP/build/LyricsPiP-unsigned.ipa
+          path: build/LyricsPiP-unsigned.ipa
           retention-days: 14
 
   unit-tests:
     runs-on: macos-14
-    defaults:
-      run:
-        working-directory: LyricsPiP
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -78,4 +69,4 @@ jobs:
             -project LyricsPiP.xcodeproj \
             -scheme LyricsPiP \
             -destination 'platform=iOS Simulator,name=iPhone 15' \
-            || echo "No LyricsPiPTests target yet — add one under LyricsPiP/LyricsPiPTests/"
+            || echo "No LyricsPiPTests target yet — add one under LyricsPiPTests/"
