@@ -3,7 +3,7 @@ name: iOS unsigned build
 on:
   workflow_dispatch: {}
   push:
-    branches: [main]
+    branches: [main, master]
     paths:
       - "LyricsPiP/**"
       - ".github/workflows/ios-build.yml"
