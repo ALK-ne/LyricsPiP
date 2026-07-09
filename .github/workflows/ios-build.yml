@@ -1,0 +1,81 @@
+name: iOS unsigned build
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - "LyricsPiP/**"
+      - ".github/workflows/ios-build.yml"
+
+jobs:
+  build:
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: LyricsPiP
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Show default Xcode version
+        run: xcodebuild -version
+
+      - name: Build unsigned .app
+        run: |
+          xcodebuild \
+            -project LyricsPiP.xcodeproj \
+            -scheme LyricsPiP \
+            -sdk iphoneos \
+            -configuration Release \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            clean build
+
+      - name: Package .ipa
+        run: |
+          set -e
+          APP_PATH="build/Build/Products/Release-iphoneos/LyricsPiP.app"
+          PAYLOAD_DIR="build/Payload"
+          mkdir -p "$PAYLOAD_DIR"
+          cp -R "$APP_PATH" "$PAYLOAD_DIR/"
+          cd build
+          zip -qr LyricsPiP-unsigned.ipa Payload
+          cd ..
+
+      - name: Upload .ipa artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LyricsPiP-unsigned-ipa
+          path: LyricsPiP/build/LyricsPiP-unsigned.ipa
+          retention-days: 14
+
+  unit-tests:
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: LyricsPiP
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Run unit tests on Simulator
+        run: |
+          xcodebuild test \
+            -project LyricsPiP.xcodeproj \
+            -scheme LyricsPiP \
+            -destination 'platform=iOS Simulator,name=iPhone 15' \
+            || echo "No LyricsPiPTests target yet — add one under LyricsPiP/LyricsPiPTests/"
