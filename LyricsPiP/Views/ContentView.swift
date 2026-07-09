@@ -39,6 +39,13 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
             Button("Spotifyにログイン") { showingLogin = true }
                 .buttonStyle(.borderedProminent)
+            if let error = sessionClient.lastError {
+                Text(error)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+            }
             Spacer()
         }
     }

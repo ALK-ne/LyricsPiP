@@ -61,6 +61,10 @@ final class PlaybackPoller: ObservableObject {
             let token = try await sessionClient.validAccessToken()
             var request = URLRequest(url: URL(string: "https://api.spotify.com/v1/me/player/currently-playing")!)
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.setValue(
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+                forHTTPHeaderField: "User-Agent"
+            )
 
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse else { return }

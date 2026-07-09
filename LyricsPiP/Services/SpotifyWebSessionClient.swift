@@ -60,11 +60,42 @@ final class SpotifyWebSessionClient: ObservableObject {
             url: URL(string: "https://open.spotify.com/get_access_token?reason=transport&productType=web_player")!
         )
         request.setValue("sp_dc=\(spDc)", forHTTPHeaderField: "Cookie")
+        request.setValue(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+            forHTTPHeaderField: "User-Agent"
+        )
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200,
-              let decoded = try? JSONDecoder().decode(AccessTokenResponse.self, from: data),
-              !decoded.isAnonymous else {
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            // Transient network failure — keep the session as logged-in so the
+            // next poll cycle retries automatically instead of bouncing the
+            // user back to the login screen.
+            lastError = "ネットワークエラー: \(error.localizedDescription)"
+            throw error
+        }
+
+        guard let http = response as? HTTPURLResponse else {
+            lastError = "予期しない応答形式でした。しばらくして再試行します。"
+            throw SpotifySessionError.cookieRejected
+        }
+
+        guard http.statusCode == 200 else {
+            // Non-200 from Spotify (rate limiting, WAF, transient outage) is not
+            // proof the cookie itself is invalid — don't log the user out for this.
+            lastError = "Spotifyからエラー応答が返ってきました(HTTP \(http.statusCode))。しばらくして再試行します。"
+            throw SpotifySessionError.cookieRejected
+        }
+
+        guard let decoded = try? JSONDecoder().decode(AccessTokenResponse.self, from: data) else {
+            lastError = "応答の解析に失敗しました。しばらくして再試行します。"
+            throw SpotifySessionError.cookieRejected
+        }
+
+        guard !decoded.isAnonymous else {
+            // This is the only reliable signal that the sp_dc cookie itself is invalid.
             isLoggedIn = false
             lastError = "sp_dcクッキーが無効になりました。再ログインしてください。"
             throw SpotifySessionError.cookieRejected
@@ -74,6 +105,7 @@ final class SpotifyWebSessionClient: ObservableObject {
         accessTokenExpiration = Date(
             timeIntervalSince1970: TimeInterval(decoded.accessTokenExpirationTimestampMs) / 1000
         )
+        lastError = nil
         return decoded.accessToken
     }
 }
