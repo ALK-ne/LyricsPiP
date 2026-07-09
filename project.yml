@@ -36,7 +36,7 @@ targets:
       properties: {}
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.lyricspip.app
+        PRODUCT_BUNDLE_IDENTIFIER: com.lyricspip.app2
         TARGETED_DEVICE_FAMILY: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     resources:
