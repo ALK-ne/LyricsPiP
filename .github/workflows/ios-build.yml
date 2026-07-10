@@ -24,7 +24,7 @@ jobs:
         # it into project.yml before generation makes it a real target
         # build setting instead, sidestepping that override-ordering issue.
         run: |
-          sed -i "s/CURRENT_PROJECT_VERSION: \"0\"/CURRENT_PROJECT_VERSION: \"${{ github.run_number }}\"/" project.yml
+          sed -i '' "s/CURRENT_PROJECT_VERSION: \"0\"/CURRENT_PROJECT_VERSION: \"${{ github.run_number }}\"/" project.yml
           grep CURRENT_PROJECT_VERSION project.yml
 
       - name: Generate Xcode project
