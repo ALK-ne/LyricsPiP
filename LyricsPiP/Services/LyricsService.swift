@@ -5,6 +5,12 @@ import LyricsPiPCore
 /// Chosen over Spotify's private internal lyrics endpoint since it doesn't
 /// require any Spotify auth at all and carries much lower ToS/stability risk.
 struct LyricsService {
+    let httpClient: any HTTPClient
+
+    init(httpClient: any HTTPClient = URLSessionHTTPClient.shared) {
+        self.httpClient = httpClient
+    }
+
     func fetchSyncedLyrics(artist: String, track: String, album: String, durationMs: Int) async throws -> [LyricLine]? {
         var components = URLComponents(string: "https://lrclib.net/api/get")!
         components.queryItems = [
@@ -17,8 +23,7 @@ struct LyricsService {
         var request = URLRequest(url: components.url!)
         request.setValue("LyricsPiP (personal use)", forHTTPHeaderField: "User-Agent")
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        let (data, http) = try await httpClient.data(for: request)
 
         if http.statusCode == 404 {
             return nil
@@ -28,12 +33,6 @@ struct LyricsService {
         }
 
         let decoded = try JSONDecoder().decode(LrclibTrack.self, from: data)
-        guard let synced = decoded.syncedLyrics, !synced.isEmpty else { return nil }
-        return LRCParser.parse(synced)
+        return decoded.syncedLines
     }
-}
-
-private struct LrclibTrack: Decodable {
-    let syncedLyrics: String?
-    let plainLyrics: String?
 }

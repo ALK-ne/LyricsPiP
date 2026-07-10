@@ -128,7 +128,13 @@ curl -s "https://lrclib.net/api/get?artist_name=<アーティスト>&track_name=
 
 ### `LyricsPiPCore/` — UIKit非依存ロジックの分離パッケージ
 
-`LRCParser`・`ActiveLineFinder`(現在行の二分探索)・`LyricLine`/`CurrentTrack`モデルは、UIKit/Spotify通信に依存しない純粋なロジックなので、独立したSwiftPMパッケージ`LyricsPiPCore/`に切り出してあります。アプリ本体(`project.yml`経由でXcodeプロジェクトが依存)とテストの両方がここを参照します。
+UIKit/Spotify通信に依存しない純粋なロジックは、独立したSwiftPMパッケージ`LyricsPiPCore/`に切り出してあります。アプリ本体(`project.yml`経由でXcodeプロジェクトが依存)とテストの両方がここを参照します。現在Coreに含まれるもの:
+
+- `LRCParser`・`ActiveLineFinder`(現在行の二分探索)・`LyricLine`/`CurrentTrack`モデル
+- `SpotifyTOTPLogic`(TOTPコード導出。ネットワーク取得はアプリ側`SpotifyTOTPProvider`が担当)
+- `SpotifyAccessToken`/`SpotifyCurrentlyPlaying`/`LrclibTrack`(各APIレスポンスのモデルとパース)
+- `PlaybackPositionInterpolator`(ポーリング間の再生位置補間)
+- `HTTPClient`/`LyricsPiPLogging`プロトコル(サービス層のテスト用シーム。本番実装はアプリ側の`URLSessionHTTPClient`と`DebugLog`)
 
 - **CI**: `unit-tests`ジョブが`cd LyricsPiPCore && swift test`を実行し、実機・シミュレータ不要で数秒〜十数秒でロジックの正しさを検証します。
 - **ローカル(Windows)での実行**: winget経由で`Swift.Toolchain`をインストールすれば`swift`コマンド自体は使えますが、`swift test`(パッケージのビルド)にはMSVC(`cl.exe`/`link.exe`)を含むVisual Studio Build Toolsが別途必要です(未検証)。

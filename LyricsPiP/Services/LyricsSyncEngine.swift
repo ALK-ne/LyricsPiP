@@ -10,13 +10,21 @@ final class LyricsSyncEngine: ObservableObject {
     @Published private(set) var activeIndex: Int?
     @Published private(set) var noLyricsFound: Bool = false
 
-    private let lyricsService = LyricsService()
+    private let lyricsService: LyricsService
+    private let logger: any LyricsPiPLogging
     private var cancellables = Set<AnyCancellable>()
     private var currentTrackId: String?
     private var fetchTask: Task<Void, Never>?
     private var debugTimerTask: Task<Void, Never>?
 
-    init(poller: PlaybackPoller) {
+    init(
+        poller: PlaybackPoller,
+        lyricsService: LyricsService? = nil,
+        logger: (any LyricsPiPLogging)? = nil
+    ) {
+        self.lyricsService = lyricsService ?? LyricsService()
+        self.logger = logger ?? DebugLog.shared
+
         poller.$currentTrack
             .removeDuplicates()
             .sink { [weak self] track in
@@ -48,7 +56,7 @@ final class LyricsSyncEngine: ObservableObject {
         activeIndex = nil
         noLyricsFound = false
 
-        DebugLog.shared.log("[Lyrics] 取得開始: \(track.name) / \(track.artist)")
+        logger.log("[Lyrics] 取得開始: \(track.name) / \(track.artist)")
         fetchTask = Task { [weak self] in
             guard let self else { return }
             do {
@@ -60,15 +68,15 @@ final class LyricsSyncEngine: ObservableObject {
                 )
                 guard !Task.isCancelled, track.id == self.currentTrackId else { return }
                 if let fetched, !fetched.isEmpty {
-                    DebugLog.shared.log("[Lyrics] 取得成功: \(fetched.count)行")
+                    self.logger.log("[Lyrics] 取得成功: \(fetched.count)行")
                     self.lines = fetched
                 } else {
-                    DebugLog.shared.log("[Lyrics] 同期歌詞なし")
+                    self.logger.log("[Lyrics] 同期歌詞なし")
                     self.noLyricsFound = true
                 }
             } catch {
                 guard !Task.isCancelled, track.id == self.currentTrackId else { return }
-                DebugLog.shared.log("[Lyrics] 取得失敗: \(error.localizedDescription)")
+                self.logger.log("[Lyrics] 取得失敗: \(error.localizedDescription)")
                 self.noLyricsFound = true
             }
         }
