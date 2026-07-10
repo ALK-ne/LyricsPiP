@@ -61,6 +61,10 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             clean build
 
+      - name: Debug - read Info.plist directly from built .app on runner
+        run: |
+          /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "build/Build/Products/Release-iphoneos/LyricsPiP.app/Info.plist"
+
       - name: Package .ipa
         run: |
           set -e
