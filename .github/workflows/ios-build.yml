@@ -30,6 +30,9 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
+      - name: Debug - dump CURRENT_PROJECT_VERSION from generated pbxproj
+        run: grep -n "CURRENT_PROJECT_VERSION" LyricsPiP.xcodeproj/project.pbxproj
+
       - name: List available Xcode versions
         run: ls /Applications | grep Xcode
 
