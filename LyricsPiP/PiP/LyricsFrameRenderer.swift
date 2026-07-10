@@ -16,27 +16,65 @@ enum LyricsFrameRenderer {
             let paragraph = NSMutableParagraphStyle()
             paragraph.alignment = .center
 
-            let currentAttrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.boldSystemFont(ofSize: 32),
-                .foregroundColor: UIColor.white,
-                .paragraphStyle: paragraph
-            ]
-            let nextAttrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 22),
-                .foregroundColor: UIColor(white: 1, alpha: 0.55),
-                .paragraphStyle: paragraph
-            ]
-
-            let currentText = currentLine ?? "♪"
-            let nextText = nextLine ?? ""
-
             let currentRect = CGRect(x: 20, y: frameSize.height / 2 - 50, width: frameSize.width - 40, height: 60)
             let nextRect = CGRect(x: 20, y: frameSize.height / 2 + 20, width: frameSize.width - 40, height: 40)
 
-            (currentText as NSString).draw(in: currentRect, withAttributes: currentAttrs)
-            (nextText as NSString).draw(in: nextRect, withAttributes: nextAttrs)
+            drawFittedLine(
+                currentLine ?? "♪",
+                in: currentRect,
+                maxFontSize: 32,
+                minFontSize: 14,
+                weight: .bold,
+                color: .white,
+                paragraphStyle: paragraph
+            )
+            drawFittedLine(
+                nextLine ?? "",
+                in: nextRect,
+                maxFontSize: 22,
+                minFontSize: 12,
+                weight: .regular,
+                color: UIColor(white: 1, alpha: 0.55),
+                paragraphStyle: paragraph
+            )
         }
         return image.cgImage
+    }
+
+    /// Draws `text` shrunk to fit within `rect`'s width (down to `minFontSize`)
+    /// and vertically centered in `rect`. Lyric lines vary a lot in length,
+    /// and a fixed font size clipped the tail of longer lines off the edge
+    /// of the small PIP surface instead of shrinking to fit.
+    private static func drawFittedLine(
+        _ text: String,
+        in rect: CGRect,
+        maxFontSize: CGFloat,
+        minFontSize: CGFloat,
+        weight: UIFont.Weight,
+        color: UIColor,
+        paragraphStyle: NSParagraphStyle
+    ) {
+        let nsText = text as NSString
+        guard nsText.length > 0 else { return }
+
+        var fontSize = maxFontSize
+        var font = UIFont.systemFont(ofSize: fontSize, weight: weight)
+        while fontSize > minFontSize {
+            let width = nsText.size(withAttributes: [.font: font]).width
+            if width <= rect.width { break }
+            fontSize -= 1
+            font = UIFont.systemFont(ofSize: fontSize, weight: weight)
+        }
+
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: color,
+            .paragraphStyle: paragraphStyle
+        ]
+        let textHeight = nsText.size(withAttributes: attrs).height
+        let yOffset = rect.origin.y + max(0, (rect.height - textHeight) / 2)
+        let drawRect = CGRect(x: rect.origin.x, y: yOffset, width: rect.width, height: textHeight)
+        nsText.draw(in: drawRect, withAttributes: attrs)
     }
 
     static func makeSampleBuffer(from cgImage: CGImage, presentationTime: CMTime) -> CMSampleBuffer? {
