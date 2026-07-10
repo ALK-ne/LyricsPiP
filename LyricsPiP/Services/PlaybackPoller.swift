@@ -22,7 +22,11 @@ final class PlaybackPoller: ObservableObject {
     private var basePositionMs: Int = 0
     private var basePollDate: Date = Date()
 
-    private let pollInterval: TimeInterval = 5.0
+    // Verified locally (tools/spotify-auth-repro.mjs) that this endpoint,
+    // accessed via an sp_dc/TOTP-derived token, has a standing ~30-35s rate
+    // limit regardless of wait time — not a one-off penalty. 40s stays safely
+    // above that observed ceiling.
+    private let pollInterval: TimeInterval = 40.0
     private let tickInterval: TimeInterval = 0.2
 
     private static let blockedUntilKey = "spotify_poll_blocked_until"
