@@ -8,6 +8,11 @@ final class PlaybackPoller: ObservableObject {
     @Published private(set) var currentTrack: CurrentTrack?
     @Published private(set) var isPlaying: Bool = false
     @Published private(set) var estimatedPositionMs: Int = 0
+    /// Set while a Spotify-issued rate limit is being honored, even across
+    /// app relaunches (see `blockedUntilKey`). ContentView surfaces this so
+    /// the user isn't tempted to force-quit/reopen — which would otherwise
+    /// fire an immediate fresh request and risk escalating the block further.
+    @Published private(set) var rateLimitedUntil: Date?
 
     private let sessionClient: SpotifyWebSessionClient
     private var pollTask: Task<Void, Never>?
@@ -19,8 +24,11 @@ final class PlaybackPoller: ObservableObject {
     private let pollInterval: TimeInterval = 5.0
     private let tickInterval: TimeInterval = 0.2
 
+    private static let blockedUntilKey = "spotify_poll_blocked_until"
+
     init(sessionClient: SpotifyWebSessionClient) {
         self.sessionClient = sessionClient
+        rateLimitedUntil = Self.persistedBlockedUntil()
         start()
     }
 
@@ -29,7 +37,23 @@ final class PlaybackPoller: ObservableObject {
         pollTask = Task { [weak self] in
             guard let self else { return }
             while !Task.isCancelled {
+                if let blockedUntil = Self.persistedBlockedUntil(), blockedUntil > Date() {
+                    let remaining = blockedUntil.timeIntervalSince(Date())
+                    self.rateLimitedUntil = blockedUntil
+                    DebugLog.shared.log("[Poll] 保存済みのレート制限中。あと\(Int(remaining))秒はリクエストを送りません")
+                    try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
+                    continue
+                }
+
                 let retryAfter = await self.pollOnce()
+                if let retryAfter {
+                    let until = Date().addingTimeInterval(retryAfter)
+                    Self.setBlockedUntil(until)
+                    self.rateLimitedUntil = until
+                } else {
+                    Self.setBlockedUntil(nil)
+                    self.rateLimitedUntil = nil
+                }
                 let delay = retryAfter ?? self.pollInterval
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             }
@@ -54,6 +78,23 @@ final class PlaybackPoller: ObservableObject {
         guard isPlaying else { return }
         let elapsedMs = Int(Date().timeIntervalSince(basePollDate) * 1000)
         estimatedPositionMs = basePositionMs + elapsedMs
+    }
+
+    /// Persisted so a force-quit + relaunch during a rate-limit window
+    /// doesn't fire an immediate fresh request against Spotify's servers
+    /// (which is what escalated a handful of 429s into a 24-hour block).
+    private static func persistedBlockedUntil() -> Date? {
+        let timestamp = UserDefaults.standard.double(forKey: blockedUntilKey)
+        guard timestamp > 0 else { return nil }
+        return Date(timeIntervalSince1970: timestamp)
+    }
+
+    private static func setBlockedUntil(_ date: Date?) {
+        if let date {
+            UserDefaults.standard.set(date.timeIntervalSince1970, forKey: blockedUntilKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: blockedUntilKey)
+        }
     }
 
     /// Returns a server-specified retry delay (from `Retry-After` on a 429)

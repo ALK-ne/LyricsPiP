@@ -8,6 +8,12 @@ struct ContentView: View {
 
     @State private var showingLogin = false
 
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .medium
+        return formatter
+    }()
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 16) {
@@ -54,6 +60,14 @@ struct ContentView: View {
 
     private var loggedInView: some View {
         VStack(spacing: 16) {
+            if let until = poller.rateLimitedUntil, until > Date() {
+                Text("Spotifyのレート制限中です。\(Self.timeFormatter.string(from: until))頃まで自動では再試行しません。アプリを閉じずにお待ちください。")
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+            }
+
             trackHeader
 
             LyricsPreviewView(
