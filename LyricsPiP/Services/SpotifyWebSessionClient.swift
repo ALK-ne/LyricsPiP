@@ -50,30 +50,45 @@ final class SpotifyWebSessionClient: ObservableObject {
         return try await refreshAccessToken()
     }
 
+    private static let userAgent =
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+
     private func refreshAccessToken() async throws -> String {
         guard let spDc = KeychainStore.get(forKey: Self.spDcKey) else {
             isLoggedIn = false
             throw SpotifySessionError.notLoggedIn
         }
 
-        var request = URLRequest(
-            url: URL(string: "https://open.spotify.com/get_access_token?reason=transport&productType=web_player")!
-        )
+        // Spotify's web player requires a TOTP code alongside the sp_dc cookie
+        // (added as an anti-scraping measure) — see SpotifyTOTP.swift. Mirror
+        // the community-established retry pattern: try "transport" first,
+        // fall back to "init" if that's rejected.
+        do {
+            return try await requestAccessToken(spDc: spDc, reason: "transport")
+        } catch {
+            return try await requestAccessToken(spDc: spDc, reason: "init")
+        }
+    }
+
+    private func requestAccessToken(spDc: String, reason: String) async throws -> String {
+        let serverTime = await fetchServerTime()
+        let totp = try await SpotifyTOTP.currentCode(at: serverTime)
+
+        var components = URLComponents(string: "https://open.spotify.com/api/token")!
+        components.queryItems = [
+            URLQueryItem(name: "reason", value: reason),
+            URLQueryItem(name: "productType", value: "web-player"),
+            URLQueryItem(name: "totp", value: totp.value),
+            URLQueryItem(name: "totpServer", value: totp.value),
+            URLQueryItem(name: "totpVer", value: String(totp.version))
+        ]
+
+        var request = URLRequest(url: components.url!)
         request.setValue("sp_dc=\(spDc)", forHTTPHeaderField: "Cookie")
-        request.setValue(
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
-            forHTTPHeaderField: "User-Agent"
-        )
-        // A real browser XHR from open.spotify.com's own web player includes
-        // these headers; without them Spotify's edge/WAF is treating the
-        // request as automated traffic and returning 403.
-        request.setValue("https://open.spotify.com/", forHTTPHeaderField: "Referer")
-        request.setValue("https://open.spotify.com", forHTTPHeaderField: "Origin")
+        request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
-        request.setValue("empty", forHTTPHeaderField: "Sec-Fetch-Dest")
-        request.setValue("cors", forHTTPHeaderField: "Sec-Fetch-Mode")
-        request.setValue("same-origin", forHTTPHeaderField: "Sec-Fetch-Site")
+        request.setValue("https://open.spotify.com/", forHTTPHeaderField: "Referer")
+        request.setValue("WebPlayer", forHTTPHeaderField: "App-Platform")
 
         let data: Data
         let response: URLResponse
@@ -117,6 +132,31 @@ final class SpotifyWebSessionClient: ObservableObject {
         )
         lastError = nil
         return decoded.accessToken
+    }
+
+    /// Uses Spotify's own edge time (via the HTTP Date header) rather than the
+    /// device clock, since the TOTP check is time-sensitive and this avoids
+    /// any local clock-skew issues entirely.
+    private func fetchServerTime() async -> Int {
+        var request = URLRequest(url: URL(string: "https://open.spotify.com/")!)
+        request.httpMethod = "HEAD"
+        request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+
+        guard let (_, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse,
+              let dateString = http.value(forHTTPHeaderField: "Date") else {
+            return Int(Date().timeIntervalSince1970)
+        }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        formatter.timeZone = TimeZone(identifier: "GMT")
+
+        guard let date = formatter.date(from: dateString) else {
+            return Int(Date().timeIntervalSince1970)
+        }
+        return Int(date.timeIntervalSince1970)
     }
 }
 
