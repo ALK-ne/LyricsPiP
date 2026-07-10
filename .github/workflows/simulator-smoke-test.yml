@@ -1,0 +1,77 @@
+name: Simulator smoke test
+
+# The Simulator always starts fresh (no persisted Keychain), so this can only
+# ever exercise the logged-out launch path -- run it only when code relevant
+# to that path changes, rather than on every push.
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main, master]
+    paths:
+      - "LyricsPiP/App/**"
+      - "LyricsPiP/Views/**"
+      - "LyricsPiP/Login/**"
+      - "LyricsPiP/Resources/**"
+      - "project.yml"
+      - ".github/workflows/simulator-smoke-test.yml"
+
+jobs:
+  simulator-smoke-test:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Select latest available Xcode
+        run: |
+          LATEST=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -n 1)
+          if [ -n "$LATEST" ]; then
+            sudo xcode-select -s "$LATEST"
+          fi
+          xcodebuild -version
+
+      - name: Build for Simulator
+        run: |
+          xcodebuild \
+            -project LyricsPiP.xcodeproj \
+            -scheme LyricsPiP \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            -derivedDataPath simbuild \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            clean build
+
+      - name: Boot Simulator, launch app, and screenshot
+        run: |
+          set -e
+          BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" \
+            simbuild/Build/Products/Debug-iphonesimulator/LyricsPiP.app/Info.plist)
+          echo "Bundle ID: $BUNDLE_ID"
+
+          DEVICE_ID=$(xcrun simctl create LyricsPiP-CI "iPhone 15")
+          xcrun simctl boot "$DEVICE_ID"
+          xcrun simctl bootstatus "$DEVICE_ID" -b
+
+          xcrun simctl install "$DEVICE_ID" simbuild/Build/Products/Debug-iphonesimulator/LyricsPiP.app
+          xcrun simctl launch "$DEVICE_ID" "$BUNDLE_ID"
+          sleep 5
+
+          mkdir -p screenshots
+          xcrun simctl io "$DEVICE_ID" screenshot screenshots/launch.png
+
+          xcrun simctl shutdown "$DEVICE_ID" || true
+          xcrun simctl delete "$DEVICE_ID" || true
+
+      - name: Upload smoke-test screenshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: LyricsPiP-simulator-screenshot
+          path: screenshots/launch.png
+          retention-days: 14

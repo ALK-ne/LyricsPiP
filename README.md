@@ -85,7 +85,9 @@ node tools/log-server.mjs 8787
 
 ### CIのシミュレータスモークテスト
 
-`ios-build.yml`の`simulator-smoke-test`ジョブが、iOSシミュレータでアプリを起動してスクリーンショットをartifactとして保存します。起動直後のクラッシュや画面崩れをCI上で検知できますが、PiP/Keychainなど実機依存の挙動はこれでは確認できません。
+`simulator-smoke-test.yml`(独立したワークフロー)が、iOSシミュレータでアプリを起動してスクリーンショットをartifactとして保存します。起動直後のクラッシュや画面崩れをCI上で検知できますが、PiP/Keychainなど実機依存の挙動はこれでは確認できません。
+
+シミュレータは常にKeychainが空の状態で起動する(＝未ログイン画面しか検証できない)ため、`LyricsPiP/App/**`・`LyricsPiP/Views/**`・`LyricsPiP/Login/**`・`LyricsPiP/Resources/**`・`project.yml`に変更があった時だけ実行されます。Spotify連携やPIP内部ロジックのみの変更では走りません(手動実行は`workflow_dispatch`で可能)。
 
 ### `tools/libimobiledevice-win/` — 実機のリアルタイムシステムログ
 
