@@ -15,3 +15,6 @@ xcuserdata/
 
 # macOS
 .DS_Store
+
+# Third-party precompiled tool (downloaded, not vendored) — see README
+tools/libimobiledevice-win/

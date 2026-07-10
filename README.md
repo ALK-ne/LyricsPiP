@@ -86,3 +86,14 @@ node tools/log-server.mjs 8787
 ### CIのシミュレータスモークテスト
 
 `ios-build.yml`の`simulator-smoke-test`ジョブが、iOSシミュレータでアプリを起動してスクリーンショットをartifactとして保存します。起動直後のクラッシュや画面崩れをCI上で検知できますが、PiP/Keychainなど実機依存の挙動はこれでは確認できません。
+
+### `tools/libimobiledevice-win/` — 実機のリアルタイムシステムログ
+
+[jrjr/libimobiledevice-windows](https://github.com/jrjr/libimobiledevice-windows) のプリコンパイル済みバイナリ(`idevicesyslog.exe`等)を使うと、USB接続したiPhoneのシステムログをWindowsから直接ストリーミングできます。オンスクリーンのデバッグログより詳細な情報(クラッシュ・OSレベルのエラー等)が必要な時に使ってください。バイナリ自体はリポジトリにコミットせず(`.gitignore`済み)、各自ダウンロードして配置します。
+
+```
+cd tools/libimobiledevice-win
+./idevicesyslog.exe -p LyricsPiP
+```
+
+`-p LyricsPiP`でアプリ名によるフィルタが効き、ノイズの多いシステムログ全体から関係する行だけ抽出できます。クラッシュログが必要な場合は同梱の`idevicecrashreport.exe`が使えます。
