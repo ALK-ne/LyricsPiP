@@ -42,6 +42,9 @@ final class PiPLyricsController: NSObject, ObservableObject {
     /// true. See PiPDisplayLayerView.swift.
     func attachDisplayLayer(_ layer: AVSampleBufferDisplayLayer) {
         guard displayLayer !== layer else { return }
+        if displayLayer != nil {
+            DebugLog.shared.log("[PiP] 警告: displayLayerが別インスタンスに差し替わりました")
+        }
         layer.videoGravity = .resizeAspect
         displayLayer = layer
         DebugLog.shared.log("[PiP] displayLayerを受け取りました")
@@ -148,17 +151,28 @@ final class PiPLyricsController: NSObject, ObservableObject {
         latestCurrentText = currentText
         latestNextText = nextText
 
-        guard let displayLayer,
-              let cgImage = LyricsFrameRenderer.renderImage(currentLine: currentText, nextLine: nextText),
-              let sampleBuffer = LyricsFrameRenderer.makeSampleBuffer(
-                from: cgImage,
-                presentationTime: CMClockGetTime(CMClockGetHostTimeClock())
-              ) else { return }
+        guard let displayLayer else {
+            DebugLog.shared.log("[PiP] フレーム更新スキップ: displayLayerがまだ無い")
+            return
+        }
+        guard let cgImage = LyricsFrameRenderer.renderImage(currentLine: currentText, nextLine: nextText) else {
+            DebugLog.shared.log("[PiP] フレーム描画失敗")
+            return
+        }
+        guard let sampleBuffer = LyricsFrameRenderer.makeSampleBuffer(
+            from: cgImage,
+            presentationTime: CMClockGetTime(CMClockGetHostTimeClock())
+        ) else {
+            DebugLog.shared.log("[PiP] サンプルバッファ作成失敗")
+            return
+        }
 
         if displayLayer.status == .failed {
+            DebugLog.shared.log("[PiP] displayLayer.status=failed、flushします")
             displayLayer.flush()
         }
         displayLayer.enqueue(sampleBuffer)
+        DebugLog.shared.log("[PiP] フレーム表示: \"\(currentText ?? "")\"")
     }
 }
 

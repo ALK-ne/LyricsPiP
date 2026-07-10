@@ -95,6 +95,27 @@ enum LyricsFrameRenderer {
             sampleTiming: &timingInfo,
             sampleBufferOut: &sampleBuffer
         )
+
+        // Without this, AVSampleBufferDisplayLayer waits for its internal
+        // clock/timebase to reach the sample's presentationTimeStamp before
+        // showing it — but nothing is driving that clock for still-frame
+        // (non-video) content, so the frame would sit enqueued forever and
+        // the layer would just show black. This tells it to show the frame
+        // the moment it's enqueued instead.
+        if let sampleBuffer,
+           let attachmentsArray = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: true),
+           CFArrayGetCount(attachmentsArray) > 0 {
+            let attachments = unsafeBitCast(
+                CFArrayGetValueAtIndex(attachmentsArray, 0),
+                to: CFMutableDictionary.self
+            )
+            CFDictionarySetValue(
+                attachments,
+                Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(),
+                Unmanaged.passUnretained(kCFBooleanTrue).toOpaque()
+            )
+        }
+
         return sampleBuffer
     }
 }
