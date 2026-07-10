@@ -36,11 +36,21 @@ final class PiPLyricsController: NSObject, ObservableObject {
             .store(in: &cancellables)
     }
 
-    /// Sets up the PIP controller ahead of time (so `isPiPPossible` reflects
-    /// device support before the user taps "start"). Safe to call repeatedly.
-    func prepare() {
+    /// Called by `PiPHostView` once its backing layer exists. That layer must
+    /// actually be part of the visible SwiftUI view hierarchy — a layer that
+    /// only exists in memory never makes `isPictureInPicturePossible` become
+    /// true. See PiPDisplayLayerView.swift.
+    func attachDisplayLayer(_ layer: AVSampleBufferDisplayLayer) {
+        guard displayLayer !== layer else { return }
+        layer.videoGravity = .resizeAspect
+        displayLayer = layer
+        DebugLog.shared.log("[PiP] displayLayerを受け取りました")
         setUpPiPControllerIfNeeded()
     }
+
+    /// Kept as a no-op call site for ContentView's onAppear — actual setup
+    /// now happens once `attachDisplayLayer` provides a real, view-hosted layer.
+    func prepare() {}
 
     func start() {
         DebugLog.shared.log("[PiP] start() 呼び出し")
@@ -109,17 +119,17 @@ final class PiPLyricsController: NSObject, ObservableObject {
 
     private func setUpPiPControllerIfNeeded() {
         guard pipController == nil else { return }
+        guard let displayLayer else {
+            DebugLog.shared.log("[PiP] displayLayer未着のためセットアップを待機")
+            return
+        }
         guard AVPictureInPictureController.isPictureInPictureSupported() else {
             DebugLog.shared.log("[PiP] このデバイス/OSはPIP非対応です")
             return
         }
 
-        let layer = AVSampleBufferDisplayLayer()
-        layer.videoGravity = .resizeAspect
-        displayLayer = layer
-
         let contentSource = AVPictureInPictureController.ContentSource(
-            sampleBufferDisplayLayer: layer,
+            sampleBufferDisplayLayer: displayLayer,
             playbackDelegate: self
         )
         let controller = AVPictureInPictureController(contentSource: contentSource)

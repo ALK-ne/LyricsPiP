@@ -83,6 +83,14 @@ struct ContentView: View {
             )
             .frame(maxHeight: .infinity)
 
+            // Must actually be part of the rendered view hierarchy for
+            // AVPictureInPictureController.isPictureInPicturePossible to ever
+            // become true — see PiPDisplayLayerView.swift. Kept tiny/unobtrusive
+            // rather than hidden(), since hidden() removes it from the render tree.
+            PiPHostView(controller: pipController)
+                .frame(width: 4, height: 4)
+                .opacity(0.01)
+
             Button(pipController.isPiPActive ? "PIPを閉じる" : "PIPで表示") {
                 if pipController.isPiPActive {
                     pipController.stop()
