@@ -14,6 +14,7 @@ final class LyricsSyncEngine: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var currentTrackId: String?
     private var fetchTask: Task<Void, Never>?
+    private var debugTimerTask: Task<Void, Never>?
 
     init(poller: PlaybackPoller) {
         poller.$currentTrack
@@ -75,5 +76,42 @@ final class LyricsSyncEngine: ObservableObject {
 
     private func updateActiveIndex(positionMs: Int) {
         activeIndex = ActiveLineFinder.activeIndex(in: lines, positionMs: positionMs)
+    }
+
+    // MARK: - Debug/test-only helper
+
+    /// Loads canned lyric lines and advances the active line on a local timer,
+    /// bypassing Spotify/lrclib entirely. Exists only to verify the PIP surface
+    /// (the highest-risk, least-verified part of the app) independently of
+    /// Spotify's current-playing rate limit. Remove once PIP is confirmed
+    /// working end-to-end with real data.
+    func loadDebugLyrics() {
+        fetchTask?.cancel()
+        currentTrackId = "debug-track"
+        noLyricsFound = false
+        lines = [
+            LyricLine(time: 0, text: "♪ デバッグ用ダミー歌詞 ♪"),
+            LyricLine(time: 3, text: "1行目のテスト歌詞です"),
+            LyricLine(time: 6, text: "2行目のテスト歌詞です"),
+            LyricLine(time: 9, text: "PIPが正しく表示されていますか？"),
+            LyricLine(time: 12, text: "Spotifyやホーム画面に切り替えてみてください"),
+            LyricLine(time: 15, text: "戻ってきても表示され続けていますか？"),
+            LyricLine(time: 18, text: "ここまで来たら成功です ♪")
+        ]
+        activeIndex = 0
+
+        debugTimerTask?.cancel()
+        debugTimerTask = Task { [weak self] in
+            var positionMs = 0
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                positionMs += 1000
+                guard let self else { return }
+                self.activeIndex = ActiveLineFinder.activeIndex(in: self.lines, positionMs: positionMs)
+                if positionMs > 20_000 {
+                    positionMs = 0 // loop back to the start
+                }
+            }
+        }
     }
 }
