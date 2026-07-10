@@ -16,11 +16,12 @@ final class PlaybackPoller: ObservableObject {
     @Published private(set) var rateLimitedUntil: Date?
 
     private let sessionClient: SpotifyWebSessionClient
+    private let httpClient: any HTTPClient
+    private let logger: any LyricsPiPLogging
     private var pollTask: Task<Void, Never>?
     private var tickTask: Task<Void, Never>?
 
-    private var basePositionMs: Int = 0
-    private var basePollDate: Date = Date()
+    private var interpolator = PlaybackPositionInterpolator()
 
     // Verified locally (tools/spotify-auth-repro.mjs) that this endpoint,
     // accessed via an sp_dc/TOTP-derived token, has a standing ~30-35s rate
@@ -31,8 +32,14 @@ final class PlaybackPoller: ObservableObject {
 
     private static let blockedUntilKey = "spotify_poll_blocked_until"
 
-    init(sessionClient: SpotifyWebSessionClient) {
+    init(
+        sessionClient: SpotifyWebSessionClient,
+        httpClient: any HTTPClient = URLSessionHTTPClient.shared,
+        logger: (any LyricsPiPLogging)? = nil
+    ) {
         self.sessionClient = sessionClient
+        self.httpClient = httpClient
+        self.logger = logger ?? DebugLog.shared
         rateLimitedUntil = Self.persistedBlockedUntil()
         start()
     }
@@ -45,7 +52,7 @@ final class PlaybackPoller: ObservableObject {
                 if let blockedUntil = Self.persistedBlockedUntil(), blockedUntil > Date() {
                     let remaining = blockedUntil.timeIntervalSince(Date())
                     self.rateLimitedUntil = blockedUntil
-                    DebugLog.shared.log("[Poll] 保存済みのレート制限中。あと\(Int(remaining))秒はリクエストを送りません")
+                    self.logger.log("[Poll] 保存済みのレート制限中。あと\(Int(remaining))秒はリクエストを送りません")
                     try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
                     continue
                 }
@@ -81,8 +88,7 @@ final class PlaybackPoller: ObservableObject {
 
     private func tick() {
         guard isPlaying else { return }
-        let elapsedMs = Int(Date().timeIntervalSince(basePollDate) * 1000)
-        estimatedPositionMs = basePositionMs + elapsedMs
+        estimatedPositionMs = interpolator.position(at: Date())
     }
 
     /// Persisted so a force-quit + relaunch during a rate-limit window
@@ -106,103 +112,60 @@ final class PlaybackPoller: ObservableObject {
     /// when the caller should wait longer than the normal poll interval.
     private func pollOnce() async -> TimeInterval? {
         guard sessionClient.isLoggedIn else {
-            DebugLog.shared.log("[Poll] 未ログインのためスキップ")
+            logger.log("[Poll] 未ログインのためスキップ")
             return nil
         }
         do {
             let token = try await sessionClient.validAccessToken()
             var request = URLRequest(url: URL(string: "https://api.spotify.com/v1/me/player/currently-playing")!)
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-            request.setValue(
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
-                forHTTPHeaderField: "User-Agent"
-            )
+            request.setValue(SpotifyWebConstants.browserUserAgent, forHTTPHeaderField: "User-Agent")
 
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse else {
-                DebugLog.shared.log("[Poll] 応答がHTTPURLResponseでない")
-                return nil
-            }
+            let (data, http) = try await httpClient.data(for: request)
 
-            DebugLog.shared.log("[Poll] currently-playing 応答: HTTP \(http.statusCode)")
+            logger.log("[Poll] currently-playing 応答: HTTP \(http.statusCode)")
 
             if http.statusCode == 429 {
                 let retryAfterHeader = http.value(forHTTPHeaderField: "Retry-After")
                 let retrySeconds = retryAfterHeader.flatMap(Double.init) ?? 30
                 let delay = max(retrySeconds, pollInterval)
-                DebugLog.shared.log("[Poll] 429レート制限。\(Int(delay))秒待って再試行します")
+                logger.log("[Poll] 429レート制限。\(Int(delay))秒待って再試行します")
                 return delay
             }
 
             if http.statusCode == 204 {
-                DebugLog.shared.log("[Poll] 204: 再生中の曲なし")
+                logger.log("[Poll] 204: 再生中の曲なし")
                 currentTrack = nil
                 isPlaying = false
                 return nil
             }
             guard http.statusCode == 200 else {
                 let bodyPreview = String(data: data.prefix(300), encoding: .utf8) ?? "(バイナリ/デコード不可)"
-                DebugLog.shared.log("[Poll] エラー応答本文: \(bodyPreview)")
+                logger.log("[Poll] エラー応答本文: \(bodyPreview)")
                 return nil
             }
 
-            let decoded = try JSONDecoder().decode(CurrentlyPlayingResponse.self, from: data)
-            guard let item = decoded.item else {
-                DebugLog.shared.log("[Poll] itemがnull(再生停止中?)")
+            let decoded = try JSONDecoder().decode(SpotifyCurrentlyPlaying.self, from: data)
+            guard let track = decoded.currentTrack else {
+                logger.log("[Poll] itemがnull(再生停止中?)")
                 currentTrack = nil
                 isPlaying = false
                 return nil
             }
 
-            let track = CurrentTrack(
-                id: item.id,
-                name: item.name,
-                artist: item.artists.first?.name ?? "",
-                album: item.album.name,
-                durationMs: item.durationMs
-            )
             if track != currentTrack {
-                DebugLog.shared.log("[Poll] 曲検知: \(track.name) / \(track.artist)")
+                logger.log("[Poll] 曲検知: \(track.name) / \(track.artist)")
                 currentTrack = track
             }
             isPlaying = decoded.isPlaying
-            basePositionMs = decoded.progressMs ?? 0
-            basePollDate = Date()
-            estimatedPositionMs = basePositionMs
+            interpolator.rebase(positionMs: decoded.progressMs ?? 0, at: Date())
+            estimatedPositionMs = interpolator.basePositionMs
             return nil
         } catch {
             // Transient network/auth failure — the next poll cycle retries.
             // A persistent failure surfaces via sessionClient.lastError (cookie invalidated).
-            DebugLog.shared.log("[Poll] 例外: \(error.localizedDescription)")
+            logger.log("[Poll] 例外: \(error.localizedDescription)")
             return nil
         }
-    }
-}
-
-private struct CurrentlyPlayingResponse: Decodable {
-    let progressMs: Int?
-    let isPlaying: Bool
-    let item: Item?
-
-    struct Item: Decodable {
-        let id: String
-        let name: String
-        let durationMs: Int
-        let artists: [Artist]
-        let album: Album
-
-        struct Artist: Decodable { let name: String }
-        struct Album: Decodable { let name: String }
-
-        enum CodingKeys: String, CodingKey {
-            case id, name, artists, album
-            case durationMs = "duration_ms"
-        }
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case progressMs = "progress_ms"
-        case isPlaying = "is_playing"
-        case item
     }
 }

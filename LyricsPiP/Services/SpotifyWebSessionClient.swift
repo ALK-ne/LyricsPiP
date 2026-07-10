@@ -1,8 +1,18 @@
 import Foundation
+import LyricsPiPCore
 
 enum SpotifySessionError: Error {
+    /// No sp_dc cookie stored — the user needs to log in.
     case notLoggedIn
-    case cookieRejected
+    /// Spotify explicitly reported the session as anonymous: the sp_dc
+    /// cookie itself is dead and only a re-login can fix it. This is the
+    /// only error that logs the user out.
+    case cookieInvalidated
+    /// Non-200 from Spotify (rate limiting, WAF, transient outage) — not
+    /// proof the cookie is invalid, so callers just retry later.
+    case serverError(statusCode: Int)
+    /// The response body wasn't in the expected shape.
+    case malformedResponse
 }
 
 /// Holds the Spotify web session (`sp_dc` cookie) and turns it into short-lived
@@ -17,10 +27,20 @@ final class SpotifyWebSessionClient: ObservableObject {
 
     private static let spDcKey = "spotify_sp_dc"
 
+    private let httpClient: any HTTPClient
+    private let logger: any LyricsPiPLogging
+    private let totpProvider: SpotifyTOTPProvider
+
     private var cachedAccessToken: String?
     private var accessTokenExpiration: Date?
 
-    init() {
+    init(
+        httpClient: any HTTPClient = URLSessionHTTPClient.shared,
+        logger: (any LyricsPiPLogging)? = nil
+    ) {
+        self.httpClient = httpClient
+        self.logger = logger ?? DebugLog.shared
+        self.totpProvider = SpotifyTOTPProvider(httpClient: httpClient)
         isLoggedIn = KeychainStore.get(forKey: Self.spDcKey) != nil
     }
 
@@ -50,9 +70,6 @@ final class SpotifyWebSessionClient: ObservableObject {
         return try await refreshAccessToken()
     }
 
-    private static let userAgent =
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
-
     private func refreshAccessToken() async throws -> String {
         guard let spDc = KeychainStore.get(forKey: Self.spDcKey) else {
             isLoggedIn = false
@@ -71,17 +88,17 @@ final class SpotifyWebSessionClient: ObservableObject {
     }
 
     private func requestAccessToken(spDc: String, reason: String) async throws -> String {
-        DebugLog.shared.log("[Session] トークン取得開始 (reason=\(reason))")
+        logger.log("[Session] トークン取得開始 (reason=\(reason))")
 
         let serverTime = await fetchServerTime()
-        DebugLog.shared.log("[Session] サーバー時刻取得: \(serverTime)")
+        logger.log("[Session] サーバー時刻取得: \(serverTime)")
 
-        let totp: SpotifyTOTP.Code
+        let totp: SpotifyTOTPCode
         do {
-            totp = try await SpotifyTOTP.currentCode(at: serverTime)
-            DebugLog.shared.log("[Session] TOTP取得成功 (ver=\(totp.version))")
+            totp = try await totpProvider.currentCode(at: serverTime)
+            logger.log("[Session] TOTP取得成功 (ver=\(totp.version))")
         } catch {
-            DebugLog.shared.log("[Session] TOTP取得失敗: \(error.localizedDescription)")
+            logger.log("[Session] TOTP取得失敗: \(error.localizedDescription)")
             lastError = "TOTPシークレットの取得に失敗しました: \(error.localizedDescription)"
             throw error
         }
@@ -97,61 +114,53 @@ final class SpotifyWebSessionClient: ObservableObject {
 
         var request = URLRequest(url: components.url!)
         request.setValue("sp_dc=\(spDc)", forHTTPHeaderField: "Cookie")
-        request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue(SpotifyWebConstants.browserUserAgent, forHTTPHeaderField: "User-Agent")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("https://open.spotify.com/", forHTTPHeaderField: "Referer")
         request.setValue("WebPlayer", forHTTPHeaderField: "App-Platform")
 
         let data: Data
-        let response: URLResponse
+        let http: HTTPURLResponse
         do {
-            (data, response) = try await URLSession.shared.data(for: request)
+            (data, http) = try await httpClient.data(for: request)
         } catch {
             // Transient network failure — keep the session as logged-in so the
             // next poll cycle retries automatically instead of bouncing the
             // user back to the login screen.
-            DebugLog.shared.log("[Session] ネットワークエラー: \(error.localizedDescription)")
+            logger.log("[Session] ネットワークエラー: \(error.localizedDescription)")
             lastError = "ネットワークエラー: \(error.localizedDescription)"
             throw error
         }
 
-        guard let http = response as? HTTPURLResponse else {
-            DebugLog.shared.log("[Session] 応答がHTTPURLResponseでない")
-            lastError = "予期しない応答形式でした。しばらくして再試行します。"
-            throw SpotifySessionError.cookieRejected
-        }
-
-        DebugLog.shared.log("[Session] /api/token 応答: HTTP \(http.statusCode)")
+        logger.log("[Session] /api/token 応答: HTTP \(http.statusCode)")
 
         guard http.statusCode == 200 else {
             // Non-200 from Spotify (rate limiting, WAF, transient outage) is not
             // proof the cookie itself is invalid — don't log the user out for this.
             let bodyPreview = String(data: data.prefix(300), encoding: .utf8) ?? "(バイナリ/デコード不可)"
-            DebugLog.shared.log("[Session] 応答本文: \(bodyPreview)")
+            logger.log("[Session] 応答本文: \(bodyPreview)")
             lastError = "Spotifyからエラー応答が返ってきました(HTTP \(http.statusCode))。しばらくして再試行します。"
-            throw SpotifySessionError.cookieRejected
+            throw SpotifySessionError.serverError(statusCode: http.statusCode)
         }
 
-        guard let decoded = try? JSONDecoder().decode(AccessTokenResponse.self, from: data) else {
+        guard let decoded = try? JSONDecoder().decode(SpotifyAccessToken.self, from: data) else {
             let bodyPreview = String(data: data.prefix(300), encoding: .utf8) ?? "(バイナリ/デコード不可)"
-            DebugLog.shared.log("[Session] JSON解析失敗。応答本文: \(bodyPreview)")
+            logger.log("[Session] JSON解析失敗。応答本文: \(bodyPreview)")
             lastError = "応答の解析に失敗しました。しばらくして再試行します。"
-            throw SpotifySessionError.cookieRejected
+            throw SpotifySessionError.malformedResponse
         }
 
         guard !decoded.isAnonymous else {
             // This is the only reliable signal that the sp_dc cookie itself is invalid.
-            DebugLog.shared.log("[Session] isAnonymous=true → クッキー無効と判定")
+            logger.log("[Session] isAnonymous=true → クッキー無効と判定")
             isLoggedIn = false
             lastError = "sp_dcクッキーが無効になりました。再ログインしてください。"
-            throw SpotifySessionError.cookieRejected
+            throw SpotifySessionError.cookieInvalidated
         }
 
-        DebugLog.shared.log("[Session] トークン取得成功")
+        logger.log("[Session] トークン取得成功")
         cachedAccessToken = decoded.accessToken
-        accessTokenExpiration = Date(
-            timeIntervalSince1970: TimeInterval(decoded.accessTokenExpirationTimestampMs) / 1000
-        )
+        accessTokenExpiration = decoded.expirationDate
         lastError = nil
         return decoded.accessToken
     }
@@ -162,10 +171,9 @@ final class SpotifyWebSessionClient: ObservableObject {
     private func fetchServerTime() async -> Int {
         var request = URLRequest(url: URL(string: "https://open.spotify.com/")!)
         request.httpMethod = "HEAD"
-        request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue(SpotifyWebConstants.browserUserAgent, forHTTPHeaderField: "User-Agent")
 
-        guard let (_, response) = try? await URLSession.shared.data(for: request),
-              let http = response as? HTTPURLResponse,
+        guard let (_, http) = try? await httpClient.data(for: request),
               let dateString = http.value(forHTTPHeaderField: "Date") else {
             return Int(Date().timeIntervalSince1970)
         }
@@ -180,11 +188,4 @@ final class SpotifyWebSessionClient: ObservableObject {
         }
         return Int(date.timeIntervalSince1970)
     }
-}
-
-private struct AccessTokenResponse: Decodable {
-    let clientId: String
-    let accessToken: String
-    let accessTokenExpirationTimestampMs: Int
-    let isAnonymous: Bool
 }

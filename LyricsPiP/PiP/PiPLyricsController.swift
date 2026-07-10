@@ -18,6 +18,8 @@ final class PiPLyricsController: NSObject, ObservableObject {
     @Published private(set) var isPiPActive = false
     @Published private(set) var isPiPPossible = false
 
+    private let logger: any LyricsPiPLogging
+
     private var pipController: AVPictureInPictureController?
     private var displayLayer: AVSampleBufferDisplayLayer?
     private var silencePlayer: AVAudioPlayer?
@@ -26,6 +28,11 @@ final class PiPLyricsController: NSObject, ObservableObject {
 
     private var latestCurrentText: String?
     private var latestNextText: String?
+
+    init(logger: (any LyricsPiPLogging)? = nil) {
+        self.logger = logger ?? DebugLog.shared
+        super.init()
+    }
 
     func attach(syncEngine: LyricsSyncEngine) {
         syncEngine.$activeIndex
@@ -43,11 +50,11 @@ final class PiPLyricsController: NSObject, ObservableObject {
     func attachDisplayLayer(_ layer: AVSampleBufferDisplayLayer) {
         guard displayLayer !== layer else { return }
         if displayLayer != nil {
-            DebugLog.shared.log("[PiP] 警告: displayLayerが別インスタンスに差し替わりました")
+            logger.log("[PiP] 警告: displayLayerが別インスタンスに差し替わりました")
         }
         layer.videoGravity = .resizeAspect
         displayLayer = layer
-        DebugLog.shared.log("[PiP] displayLayerを受け取りました")
+        logger.log("[PiP] displayLayerを受け取りました")
         setUpPiPControllerIfNeeded()
     }
 
@@ -56,13 +63,13 @@ final class PiPLyricsController: NSObject, ObservableObject {
     func prepare() {}
 
     func start() {
-        DebugLog.shared.log("[PiP] start() 呼び出し")
+        logger.log("[PiP] start() 呼び出し")
         configureAudioSession()
         setUpPiPControllerIfNeeded()
         playSilenceLoop()
 
         guard let pipController else {
-            DebugLog.shared.log("[PiP] pipControllerがnil。開始できません(デバイス非対応?)")
+            logger.log("[PiP] pipControllerがnil。開始できません(デバイス非対応?)")
             return
         }
 
@@ -72,10 +79,10 @@ final class PiPLyricsController: NSObject, ObservableObject {
         // fails *silently* (no error, no delegate call), which is exactly
         // what looked like "the button does nothing".
         if pipController.isPictureInPicturePossible {
-            DebugLog.shared.log("[PiP] isPictureInPicturePossible=true、即座に開始")
+            logger.log("[PiP] isPictureInPicturePossible=true、即座に開始")
             pipController.startPictureInPicture()
         } else {
-            DebugLog.shared.log("[PiP] isPictureInPicturePossible=false。準備が整うのを待ちます")
+            logger.log("[PiP] isPictureInPicturePossible=false。準備が整うのを待ちます")
             waitForPossibleThenStart()
         }
     }
@@ -88,12 +95,12 @@ final class PiPLyricsController: NSObject, ObservableObject {
                 try? await Task.sleep(nanoseconds: 100_000_000)
                 if Task.isCancelled { return }
                 if let pc = self.pipController, pc.isPictureInPicturePossible {
-                    DebugLog.shared.log("[PiP] isPictureInPicturePossibleがtrueになったので開始")
+                    self.logger.log("[PiP] isPictureInPicturePossibleがtrueになったので開始")
                     pc.startPictureInPicture()
                     return
                 }
             }
-            DebugLog.shared.log("[PiP] 5秒待ってもisPictureInPicturePossibleがfalseのまま。開始を諦めます")
+            self.logger.log("[PiP] 5秒待ってもisPictureInPicturePossibleがfalseのまま。開始を諦めます")
         }
     }
 
@@ -123,11 +130,11 @@ final class PiPLyricsController: NSObject, ObservableObject {
     private func setUpPiPControllerIfNeeded() {
         guard pipController == nil else { return }
         guard let displayLayer else {
-            DebugLog.shared.log("[PiP] displayLayer未着のためセットアップを待機")
+            logger.log("[PiP] displayLayer未着のためセットアップを待機")
             return
         }
         guard AVPictureInPictureController.isPictureInPictureSupported() else {
-            DebugLog.shared.log("[PiP] このデバイス/OSはPIP非対応です")
+            logger.log("[PiP] このデバイス/OSはPIP非対応です")
             return
         }
 
@@ -139,7 +146,7 @@ final class PiPLyricsController: NSObject, ObservableObject {
         controller.delegate = self
         pipController = controller
         isPiPPossible = true
-        DebugLog.shared.log("[PiP] コントローラーのセットアップ完了")
+        logger.log("[PiP] コントローラーのセットアップ完了")
     }
 
     private func updateFrame(activeIndex: Int?, lines: [LyricLine]) {
@@ -152,41 +159,41 @@ final class PiPLyricsController: NSObject, ObservableObject {
         latestNextText = nextText
 
         guard let displayLayer else {
-            DebugLog.shared.log("[PiP] フレーム更新スキップ: displayLayerがまだ無い")
+            logger.log("[PiP] フレーム更新スキップ: displayLayerがまだ無い")
             return
         }
         guard let cgImage = LyricsFrameRenderer.renderImage(currentLine: currentText, nextLine: nextText) else {
-            DebugLog.shared.log("[PiP] フレーム描画失敗")
+            logger.log("[PiP] フレーム描画失敗")
             return
         }
         guard let sampleBuffer = LyricsFrameRenderer.makeSampleBuffer(
             from: cgImage,
             presentationTime: CMClockGetTime(CMClockGetHostTimeClock())
         ) else {
-            DebugLog.shared.log("[PiP] サンプルバッファ作成失敗")
+            logger.log("[PiP] サンプルバッファ作成失敗")
             return
         }
 
         if displayLayer.status == .failed {
-            DebugLog.shared.log("[PiP] displayLayer.status=failed、flushします")
+            logger.log("[PiP] displayLayer.status=failed、flushします")
             displayLayer.flush()
         }
         displayLayer.enqueue(sampleBuffer)
-        DebugLog.shared.log("[PiP] フレーム表示: \"\(currentText ?? "")\"")
+        logger.log("[PiP] フレーム表示: \"\(currentText ?? "")\"")
     }
 }
 
 extension PiPLyricsController: AVPictureInPictureControllerDelegate {
     nonisolated func pictureInPictureControllerDidStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
         Task { @MainActor in
-            DebugLog.shared.log("[PiP] 開始成功")
+            self.logger.log("[PiP] 開始成功")
             self.isPiPActive = true
         }
     }
 
     nonisolated func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
         Task { @MainActor in
-            DebugLog.shared.log("[PiP] 停止")
+            self.logger.log("[PiP] 停止")
             self.isPiPActive = false
         }
     }
@@ -196,7 +203,7 @@ extension PiPLyricsController: AVPictureInPictureControllerDelegate {
         failedToStartPictureInPictureWithError error: Error
     ) {
         Task { @MainActor in
-            DebugLog.shared.log("[PiP] 開始失敗: \(error.localizedDescription)")
+            self.logger.log("[PiP] 開始失敗: \(error.localizedDescription)")
         }
     }
 }
