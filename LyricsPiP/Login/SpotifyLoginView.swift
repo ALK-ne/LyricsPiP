@@ -82,6 +82,7 @@ final class SpotifyLoginViewController: UIViewController {
             self.pollTimer = nil
             let value = spDc.value
             DispatchQueue.main.async {
+                DebugLog.shared.log("[Login] sp_dcクッキー取得 (長さ: \(value.count)文字)")
                 self.onLoggedIn(value)
             }
         }

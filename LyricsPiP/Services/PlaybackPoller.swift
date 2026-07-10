@@ -56,7 +56,10 @@ final class PlaybackPoller: ObservableObject {
     }
 
     private func pollOnce() async {
-        guard sessionClient.isLoggedIn else { return }
+        guard sessionClient.isLoggedIn else {
+            DebugLog.shared.log("[Poll] 未ログインのためスキップ")
+            return
+        }
         do {
             let token = try await sessionClient.validAccessToken()
             var request = URLRequest(url: URL(string: "https://api.spotify.com/v1/me/player/currently-playing")!)
@@ -67,17 +70,28 @@ final class PlaybackPoller: ObservableObject {
             )
 
             let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse else { return }
+            guard let http = response as? HTTPURLResponse else {
+                DebugLog.shared.log("[Poll] 応答がHTTPURLResponseでない")
+                return
+            }
+
+            DebugLog.shared.log("[Poll] currently-playing 応答: HTTP \(http.statusCode)")
 
             if http.statusCode == 204 {
+                DebugLog.shared.log("[Poll] 204: 再生中の曲なし")
                 currentTrack = nil
                 isPlaying = false
                 return
             }
-            guard http.statusCode == 200 else { return }
+            guard http.statusCode == 200 else {
+                let bodyPreview = String(data: data.prefix(300), encoding: .utf8) ?? "(バイナリ/デコード不可)"
+                DebugLog.shared.log("[Poll] エラー応答本文: \(bodyPreview)")
+                return
+            }
 
             let decoded = try JSONDecoder().decode(CurrentlyPlayingResponse.self, from: data)
             guard let item = decoded.item else {
+                DebugLog.shared.log("[Poll] itemがnull(再生停止中?)")
                 currentTrack = nil
                 isPlaying = false
                 return
@@ -91,6 +105,7 @@ final class PlaybackPoller: ObservableObject {
                 durationMs: item.durationMs
             )
             if track != currentTrack {
+                DebugLog.shared.log("[Poll] 曲検知: \(track.name) / \(track.artist)")
                 currentTrack = track
             }
             isPlaying = decoded.isPlaying
@@ -100,6 +115,7 @@ final class PlaybackPoller: ObservableObject {
         } catch {
             // Transient network/auth failure — the next poll cycle retries.
             // A persistent failure surfaces via sessionClient.lastError (cookie invalidated).
+            DebugLog.shared.log("[Poll] 例外: \(error.localizedDescription)")
         }
     }
 }

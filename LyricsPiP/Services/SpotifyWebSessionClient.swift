@@ -71,8 +71,20 @@ final class SpotifyWebSessionClient: ObservableObject {
     }
 
     private func requestAccessToken(spDc: String, reason: String) async throws -> String {
+        DebugLog.shared.log("[Session] トークン取得開始 (reason=\(reason))")
+
         let serverTime = await fetchServerTime()
-        let totp = try await SpotifyTOTP.currentCode(at: serverTime)
+        DebugLog.shared.log("[Session] サーバー時刻取得: \(serverTime)")
+
+        let totp: SpotifyTOTP.Code
+        do {
+            totp = try await SpotifyTOTP.currentCode(at: serverTime)
+            DebugLog.shared.log("[Session] TOTP取得成功 (ver=\(totp.version))")
+        } catch {
+            DebugLog.shared.log("[Session] TOTP取得失敗: \(error.localizedDescription)")
+            lastError = "TOTPシークレットの取得に失敗しました: \(error.localizedDescription)"
+            throw error
+        }
 
         var components = URLComponents(string: "https://open.spotify.com/api/token")!
         components.queryItems = [
@@ -98,34 +110,44 @@ final class SpotifyWebSessionClient: ObservableObject {
             // Transient network failure — keep the session as logged-in so the
             // next poll cycle retries automatically instead of bouncing the
             // user back to the login screen.
+            DebugLog.shared.log("[Session] ネットワークエラー: \(error.localizedDescription)")
             lastError = "ネットワークエラー: \(error.localizedDescription)"
             throw error
         }
 
         guard let http = response as? HTTPURLResponse else {
+            DebugLog.shared.log("[Session] 応答がHTTPURLResponseでない")
             lastError = "予期しない応答形式でした。しばらくして再試行します。"
             throw SpotifySessionError.cookieRejected
         }
 
+        DebugLog.shared.log("[Session] /api/token 応答: HTTP \(http.statusCode)")
+
         guard http.statusCode == 200 else {
             // Non-200 from Spotify (rate limiting, WAF, transient outage) is not
             // proof the cookie itself is invalid — don't log the user out for this.
+            let bodyPreview = String(data: data.prefix(300), encoding: .utf8) ?? "(バイナリ/デコード不可)"
+            DebugLog.shared.log("[Session] 応答本文: \(bodyPreview)")
             lastError = "Spotifyからエラー応答が返ってきました(HTTP \(http.statusCode))。しばらくして再試行します。"
             throw SpotifySessionError.cookieRejected
         }
 
         guard let decoded = try? JSONDecoder().decode(AccessTokenResponse.self, from: data) else {
+            let bodyPreview = String(data: data.prefix(300), encoding: .utf8) ?? "(バイナリ/デコード不可)"
+            DebugLog.shared.log("[Session] JSON解析失敗。応答本文: \(bodyPreview)")
             lastError = "応答の解析に失敗しました。しばらくして再試行します。"
             throw SpotifySessionError.cookieRejected
         }
 
         guard !decoded.isAnonymous else {
             // This is the only reliable signal that the sp_dc cookie itself is invalid.
+            DebugLog.shared.log("[Session] isAnonymous=true → クッキー無効と判定")
             isLoggedIn = false
             lastError = "sp_dcクッキーが無効になりました。再ログインしてください。"
             throw SpotifySessionError.cookieRejected
         }
 
+        DebugLog.shared.log("[Session] トークン取得成功")
         cachedAccessToken = decoded.accessToken
         accessTokenExpiration = Date(
             timeIntervalSince1970: TimeInterval(decoded.accessTokenExpirationTimestampMs) / 1000

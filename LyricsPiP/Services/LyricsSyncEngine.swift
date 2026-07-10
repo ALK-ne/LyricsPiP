@@ -46,6 +46,7 @@ final class LyricsSyncEngine: ObservableObject {
         activeIndex = nil
         noLyricsFound = false
 
+        DebugLog.shared.log("[Lyrics] 取得開始: \(track.name) / \(track.artist)")
         fetchTask = Task { [weak self] in
             guard let self else { return }
             do {
@@ -57,12 +58,15 @@ final class LyricsSyncEngine: ObservableObject {
                 )
                 guard !Task.isCancelled, track.id == self.currentTrackId else { return }
                 if let fetched, !fetched.isEmpty {
+                    DebugLog.shared.log("[Lyrics] 取得成功: \(fetched.count)行")
                     self.lines = fetched
                 } else {
+                    DebugLog.shared.log("[Lyrics] 同期歌詞なし")
                     self.noLyricsFound = true
                 }
             } catch {
                 guard !Task.isCancelled, track.id == self.currentTrackId else { return }
+                DebugLog.shared.log("[Lyrics] 取得失敗: \(error.localizedDescription)")
                 self.noLyricsFound = true
             }
         }

@@ -16,6 +16,8 @@ struct ContentView: View {
                 } else {
                     loggedInView
                 }
+
+                DebugLogView()
             }
             .padding()
             .navigationTitle("LyricsPiP")
