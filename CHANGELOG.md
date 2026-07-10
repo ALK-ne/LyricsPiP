@@ -1,45 +1,100 @@
 # CHANGELOG
 
-このプロジェクトの開発セッションごとの作業内容をまとめる。技術的な詳細・恒久的な注意点は`README.md`側に反映し、ここには「そのセッションで何をしたか」の記録を残す。
+このプロジェクトの開発セッションごとの作業内容をまとめる。技術的な詳細・恒久的な注意点は`README.md`側に反映し、ここにはセッションの経緯そのものを記録する。
 
-## 2026-07-10
+## 2026-07-10 (プロジェクト開始〜現在)
 
-### ビルド番号(`CFBundleVersion`)がずっと`1`のまま更新されない不具合の調査・修正
+### 1. 企画・実現可能性の検討
 
-- `CURRENT_PROJECT_VERSION`をxcodebuildへのコマンドライン引数で渡す方式で試したが、コンパイル後のInfo.plistの`CFBundleVersion`が常に`1`のまま変わらない不具合が発覚。
+- 要望: Spotifyで再生中の曲に同期して歌詞をPIP(Picture in Picture)でフロート表示するiPhoneアプリ。App Store配布はせず個人利用に限定(非公式な手段の使用も許容)。
+- 制約の洗い出し:
+  - Spotify Premium未加入 → 2026年2月の規約変更で、公式App Remote SDK/Web API(Developer Dashboard経由)はオーナーがPremium契約中であることが必須になっており使用不可。
+  - 追加の金銭コストは不可 → ShazamKit(有料Apple Developer Program必須)、AudD等のクラウド音声認識API(リクエスト課金)を却下。
+  - マイクでの周囲音認識は不可 → イヤホン使用時はそもそも音を拾えないため却下(ShazamKit/AudDを却下した本質的な理由)。
+  - Control Center表示の読み取りも実用性の面で却下。
+  - Macを所持していない → ビルドはGitHub ActionsのmacOSランナーで行い、実機インストールはWindows上のツールでサイドロードする方針に決定。
+- 最終的に採用した技術構成:
+  - 曲検知: Spotifyの内部Webセッション認証(`sp_dc`クッキー)を使い、公式Web APIと同じ`/me/player/currently-playing`を叩く非公式な方法。
+  - 歌詞取得: [lrclib.net](https://lrclib.net)の無料公開API(認証不要・同期歌詞対応)。
+  - PIP表示: iOS 15+の`AVPictureInPictureController`カスタムContentSource(非動画コンテンツ向け)。
+  - プロジェクト管理: XcodeGen(`project.yml`から`.xcodeproj`を都度生成、リポジトリにはコミットしない)。
+  - ビルド: GitHub Actions `macos-14`ランナー。パブリックリポジトリとして運用しmacOSランナーの無料枠を無制限にする。
+  - 実機インストール: 当初はAltServer(後にSideloadlyへ移行、後述)。
+
+### 2. リポジトリ初期構築とCIの立ち上げ
+
+- 新規パブリックリポジトリ(`ALK-ne/LyricsPiP`)としてプッシュ。
+- XcodeGenの`project.yml`、SwiftUIのアプリ骨格(ログイン画面・再生中トラック表示・歌詞プレビュー・PIPコントローラ)を一括で初期実装。
+- CIの初期不具合を順番に修正:
+  - デフォルトブランチが`master`だったためワークフローのトリガー設定を修正。
+  - 誤って`working-directory: LyricsPiP`を指定していたが、リポジトリ直下がアプリのルートだったため削除。
+  - XcodeGen生成物と噛み合うXcodeバージョンをランナー上で明示的に選択するよう修正。
+  - アプリアイコンが無いとサイドロードの署名パイプラインが壊れることが判明し、プレースホルダーアイコンを追加。
+
+### 3. Spotify認証フローの実装とトラブルシューティング
+
+- `sp_dc`クッキーをWKWebViewでのログイン後に取得しKeychainに保存、そこからBearerトークンを取得する`SpotifyWebSessionClient`を実装。
+- トークン取得エンドポイントから403が返る問題 → ブラウザに近いHTTPヘッダー(User-Agent, Referer等)を付与して解消。
+- 続けて、Spotifyがトークン取得エンドポイントにTOTP(Time-based One-Time Password)検証を追加していることが判明。秘密鍵はハードコードせず、コミュニティが継続的に追跡しているミラー(`xyloflake/spot-secrets-go`)から実行時に取得する方式(`SpotifyTOTP.swift`)で対応。
+- 一時的なネットワークエラーやレート制限で毎回ログイン状態が失われてしまうバグ(「ログインしてもすぐログイン画面に戻る」症状の原因)を修正: Spotifyが明示的に`isAnonymous: true`を返した場合のみログアウト扱いにするよう変更。
+- `/me/player/currently-playing`への429エラー対応:
+  - 最初は`Retry-After`ヘッダーに従ってバックオフする実装、アプリ再起動時にもブロック状態を引き継ぐ`UserDefaults`永続化を実装。
+  - 一度`Retry-After: 86400`(24時間ブロック)が返り誤診断しかけたが、後にNode.jsでのローカル再現スクリプト(`tools/spotify-auth-repro.mjs`)で検証した結果、実際にはこのトークン種別に対する**常時約30〜35秒に1回という恒常的なレート制限**であることが判明(24時間ブロックは別の一時的事象で数十分〜1時間程度で自然解消)。ポーリング間隔を最終的に40秒に調整し、レート制限中はアプリ内にオレンジの警告バナーを表示するようにした。
+
+### 4. サイドロード環境: AltServer → Sideloadly
+
+- 当初はAltServerでのサイドロードを想定していたが、運用中に繰り返しエラーが発生。
+- Sideloadlyへの切り替えを実施。以後も「Local Anisette」関連の致命的エラー(`iTunesCore.dll`欠落/破損)やログイン時404エラーが発生したが、**AltServerに戻すのではなくSideloadly自体を直す方針**を明確に決定(完全アンインストール→再インストール、`%LOCALAPPDATA%\Sideloadly`のキャッシュ削除で解消)。この方針は今後同様のエラーが出ても踏襲する取り決めとして確定。
+
+### 5. Macなし開発ループの改善(GitHub Issue #1)
+
+Mac/シミュレータが無いため「push→CI→ダウンロード→サイドロード→実機確認」という遅いループしか無い課題に対し、Issue #1「Macなし開発のデバッグループ改善策まとめ」を作成し、6項目のうち以下を実装(3のSideStore、6のSentryは対象外):
+
+1. **認証フローのローカル再現**: `tools/spotify-auth-repro.mjs`(Node.js)で、sp_dc→TOTP→トークン取得→currently-playingの一連の流れをiPhone無しで数秒単位で試行錯誤できるようにした。レート制限の実態解明にも活用。
+2. **実機のリアルタイムログ取得**:
+   - 2a: アプリ内のオンスクリーンデバッグログに加え、同一WiFi上のPCへログをPOSTする`tools/log-server.mjs`を追加。PIPでバックグラウンドに回った後も確認できる。
+   - 2b: `libimobiledevice`のWindowsビルド(`idevicesyslog.exe`等)をセットアップし、USB接続でのリアルタイムシステムログ取得を確認。
+4. **コアロジックの切り出し**: `LRCParser`・`ActiveLineFinder`・`LyricLine`/`CurrentTrack`をUIKit非依存の`LyricsPiPCore`SwiftPMパッケージに分離し、`swift test`で実機・シミュレータ不要のユニットテスト(13件)をCIで実行するようにした。
+5. **CIシミュレータスモークテスト**: 独立したワークフロー`simulator-smoke-test.yml`を追加し、起動直後のクラッシュや画面崩れをCI上で検知できるようにした(ログイン状態依存の変更のみで走るようパス指定)。
+
+### 6. PIP表示の実装・デバッグ
+
+- 実際のSpotify連携が曲検知のレート制限で頻繁に止まってしまうため、Spotify通信を経由せずにPIP自体の動作確認ができるよう、ダミー歌詞を読み込むデバッグボタンを追加(`LyricsSyncEngine.loadDebugLyrics()`)。
+- ここから、PIPが「起動はするが画面が真っ黒」という不具合の原因を段階的に特定・修正:
+  1. `AVSampleBufferDisplayLayer`が実際のSwiftUIビュー階層に存在しないと`isPictureInPicturePossible`が真にならない → プレビュー用ビュー(`PiPDisplayLayerView.swift`)を新設し、実際に描画される場所にレイヤーを配置。
+  2. 診断のため背景色を一時的に黒→明るい緑に変更し、「何らかの色が画面に届いているか」を切り分け(結果: 届いていなかった)。
+  3. 静止画コンテンツには`kCMSampleAttachmentKey_DisplayImmediately`が無いとフレームが永久に描画待ちのまま → サンプルバッファ生成時に付与。
+  4. `CVPixelBufferCreate`に`kCVPixelBufferIOSurfacePropertiesKey`が無いと、PIPのようなプロセス外合成が必要な用途ではエラー無しに何も表示されない → 生成時のattributesに追加、背景色も黒に戻す。
+- 実機での確認により、PIPウィンドウ内にダミー歌詞のテキストが実際に表示されることを確認(黒画面バグの解消)。
+- 続けて、文字数の多い歌詞行が矩形からはみ出て末尾が欠けて表示される不具合が発覚 → `LyricsFrameRenderer`にフォントサイズ自動縮小ロジックを追加し、実機で解消を確認。
+
+### 7. ビルド番号(バージョン表示)の実装とバグ調査
+
+- どのCIビルドが実機に入っているか判別できるよう、`CFBundleVersion`をGitHub Actionsの実行番号に連動させてアプリ内(ログイン後の画面のみ)に表示する機能を追加。
+- 当初`CURRENT_PROJECT_VERSION`をxcodebuildへのコマンドライン引数で渡す方式にしたが、コンパイル後のInfo.plistの`CFBundleVersion`が常に`1`のまま変わらない不具合が発覚。
 - `project.yml`への事前埋め込み、生成後の`.pbxproj`の直接確認、`xcodebuild -showBuildSettings`、ビルド直後にCIランナー上で直接Info.plistを読む、と段階的に検証したが、すべての段階で正しい値(実行番号)が確認できるにもかかわらず、最終成果物だけ常に`1`になるという再現性のある不可解な挙動を確認。根本原因の特定は断念。
-- 回避策として、ビルド後に`PlistBuddy`で`CFBundleVersion`を直接上書きする方式に変更し、確実に反映されることを確認(build 34で`v1.0 (build 34)`表示を確認)。
-- 調査用の診断ステップ・`project.yml`の事前置換処理は最終的に削除し、`PlistBuddy`によるパッチのみを残してワークフローを整理。
+- 回避策として、ビルド後に`PlistBuddy`で`CFBundleVersion`を直接上書きする方式に変更し、確実に反映されることを確認(build 34で`v1.0 (build 34)`表示を確認)。調査用の診断ステップは最終的に削除して整理。
 - 整理中に誤って`Install XcodeGen`ステップを削除してしまいビルド失敗 → 即座に復元して解消。
 
-### PIPの黒画面バグの修正・確認
-
-- ダミー歌詞データでのPIP動作テストで、PIP自体は起動するもののウィンドウ内が真っ黒になる不具合を確認。
-- 3つの原因を特定・修正:
-  1. `AVSampleBufferDisplayLayer`が実際のSwiftUIビュー階層に存在しないと`isPictureInPicturePossible`が真にならない → `PiPDisplayLayerView.swift`を新設し、アプリ内プレビューとして実際に描画されるようにした。
-  2. 静止画コンテンツ(動画クロックが進まない)には`kCMSampleAttachmentKey_DisplayImmediately`が無いと、フレームが永久に描画待ちのまま → サンプルバッファ生成時に付与するよう修正。
-  3. `CVPixelBufferCreate`に`kCVPixelBufferIOSurfacePropertiesKey`が無いと、PIPのようなプロセス外合成が必要な用途ではエラー無しに何も表示されない → 生成時のattributesに追加。
-- 実機での確認により、PIPウィンドウ内にダミー歌詞のテキストが正しく表示されることを確認。
-
-### 長い歌詞行がPIP内で途切れる不具合の修正
-
-- PIP動作確認中、文字数の多い行が矩形からはみ出て末尾が欠けて表示される不具合が発覚。
-- `LyricsFrameRenderer`に、指定した幅に収まるまでフォントサイズを自動的に縮小してから描画するロジックを追加(縦方向も中央寄せに変更)。
-- 実機で長短さまざまな行が正しく1行に収まって表示されることを確認。
-
-### lrclib.net連携の単体検証(実機を使わずに)
+### 8. lrclib.net連携の単体検証
 
 - `curl`で実際のAPIレスポンスを取得し、`LyricsService.swift`が期待するJSON構造(`syncedLyrics`/`plainLyrics`)と一致することを確認。
 - `LRCParser`の正規表現が実際のレスポンス形式(空行・複数行・日本語含む)を問題なくパースできることを確認。
 - 洋楽(Queen "Bohemian Rhapsody")・邦楽(YOASOBI「夜に駆ける」)の両方でテスト。該当曲が無い場合の404 → `nil`フォールバックも確認。
 
-### READMEの更新
+### 9. READMEの更新
 
 - サイドロードツールがAltServerからSideloadlyに移行済みであることを反映(セットアップ手順・既知の落とし穴・継続運用の説明を全面更新)。
-- 上記で判明したTOTP要件、実際のレート制限挙動(常時約30〜35秒に1回)、PIP修正内容、`CFBundleVersion`の謎の挙動、lrclib.net検証結果を「既知のリスク・制約」および新規セクションとして追記。
+- TOTP要件、実際のレート制限挙動、PIP修正内容、`CFBundleVersion`の謎の挙動、lrclib.net検証結果を「既知のリスク・制約」および新規セクションとして追記。
 
-### 現状
+### このセッション中に確立した作業ルール
 
-- Issue #1(Macなし開発のデバッグループ改善策)のうち、項目1・2a・2b・4・5は実装済み、項目3(SideStore)・6(Sentry)は対象外。
+- PowerShell/Bash/Monitorツールの使用に毎回許可申請させず、一連の操作後に要約を提示する。
+- Sideloadlyでエラーが出てもAltStore/AltServerへの切り替えを提案せず、Sideloadly自体を直す。
+- 応答は敬語で統一する。
+
+### 現状・残タスク
+
+- Issue #1の対応項目(1・2a・2b・4・5)は実装済み、README/CHANGELOGにも反映済み。
 - ダミー歌詞を使ったPIP表示の主要な不具合(黒画面・長い行の途切れ)は解消済み。
 - 残タスク: 実際のSpotify再生を使った本番パイプライン(ログイン→曲検知→歌詞取得→PIP表示)の通し確認。
