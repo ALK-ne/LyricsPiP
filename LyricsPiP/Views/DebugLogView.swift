@@ -28,6 +28,18 @@ struct DebugLogView: View {
                 .font(.caption)
             }
 
+            TextField(
+                "リモートログサーバー (任意) 例: http://192.168.1.5:8787/log",
+                text: $log.remoteServerURLString
+            )
+            .font(.system(size: 10))
+            .textFieldStyle(.roundedBorder)
+            .autocorrectionDisabled(true)
+            #if os(iOS)
+            .textInputAutocapitalization(.never)
+            .keyboardType(.URL)
+            #endif
+
             ScrollViewReader { proxy in
                 ScrollView {
                     Text(log.fullText.isEmpty ? "(まだログはありません)" : log.fullText)

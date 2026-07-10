@@ -61,4 +61,28 @@ LyricsPiP/
 
 ## ローカルでの動作確認について
 
-Windows環境のためXcode/iOSシミュレータは利用できません。ロジック単体(LRCパース等)のテストはCI上の`unit-tests`ジョブ(iOSシミュレータ)で実行され、実際のUI/PIP/Spotify連携の確認は上記のCI→AltServerサイドロードのサイクルを通じて実機でのみ行えます。
+Windows環境のためXcode/iOSシミュレータは利用できません。実際のUI/PIP/Spotify連携の確認は、CI→AltServerサイドロードのサイクルを通じて実機でのみ行えます。ただし以下のツールで、この遅いループに頼らずに済む部分もあります。
+
+### `tools/spotify-auth-repro.mjs` — 認証フローのローカル再現
+
+`sp_dc`クッキー → TOTP付きトークン取得 → `currently-playing`という一連の認証フローは純粋なHTTP通信なので、iPhone無しでNode.js(18+)で再現できます。
+
+```
+node tools/spotify-auth-repro.mjs <sp_dcクッキーの値>
+```
+
+リクエストの形やヘッダーを試行錯誤する際、CIビルドを待たずに数秒で結果が見られます。`Services/SpotifyTOTP.swift` / `Services/SpotifyWebSessionClient.swift`のSwift実装と同じロジックです。
+
+### `tools/log-server.mjs` — リモートログ受信サーバー
+
+PIPでバックグラウンドに回った後などオンスクリーンのデバッグログが見えない場面向けに、同一WiFi上のPCへログをPOSTで送る簡易サーバーです。
+
+```
+node tools/log-server.mjs 8787
+```
+
+起動後に表示されるURL(例: `http://192.168.1.5:8787/log`)を、アプリ内デバッグログパネルの「リモートログサーバー」欄に入力してください。
+
+### CIのシミュレータスモークテスト
+
+`ios-build.yml`の`simulator-smoke-test`ジョブが、iOSシミュレータでアプリを起動してスクリーンショットをartifactとして保存します。起動直後のクラッシュや画面崩れをCI上で検知できますが、PiP/Keychainなど実機依存の挙動はこれでは確認できません。

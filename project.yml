@@ -31,6 +31,10 @@ targets:
           - picture-in-picture
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        NSLocalNetworkUsageDescription: >-
+          開発用のデバッグログを同一WiFi上のPCに送信するために使用します(任意設定)。
     entitlements:
       path: LyricsPiP/App/LyricsPiP.entitlements
       properties: {}
