@@ -16,7 +16,7 @@ final class PlaybackPoller: ObservableObject {
     private var basePositionMs: Int = 0
     private var basePollDate: Date = Date()
 
-    private let pollInterval: TimeInterval = 2.5
+    private let pollInterval: TimeInterval = 5.0
     private let tickInterval: TimeInterval = 0.2
 
     init(sessionClient: SpotifyWebSessionClient) {
@@ -29,8 +29,9 @@ final class PlaybackPoller: ObservableObject {
         pollTask = Task { [weak self] in
             guard let self else { return }
             while !Task.isCancelled {
-                await self.pollOnce()
-                try? await Task.sleep(nanoseconds: UInt64(self.pollInterval * 1_000_000_000))
+                let retryAfter = await self.pollOnce()
+                let delay = retryAfter ?? self.pollInterval
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             }
         }
         tickTask = Task { [weak self] in
@@ -55,10 +56,12 @@ final class PlaybackPoller: ObservableObject {
         estimatedPositionMs = basePositionMs + elapsedMs
     }
 
-    private func pollOnce() async {
+    /// Returns a server-specified retry delay (from `Retry-After` on a 429)
+    /// when the caller should wait longer than the normal poll interval.
+    private func pollOnce() async -> TimeInterval? {
         guard sessionClient.isLoggedIn else {
             DebugLog.shared.log("[Poll] 未ログインのためスキップ")
-            return
+            return nil
         }
         do {
             let token = try await sessionClient.validAccessToken()
@@ -72,21 +75,29 @@ final class PlaybackPoller: ObservableObject {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse else {
                 DebugLog.shared.log("[Poll] 応答がHTTPURLResponseでない")
-                return
+                return nil
             }
 
             DebugLog.shared.log("[Poll] currently-playing 応答: HTTP \(http.statusCode)")
+
+            if http.statusCode == 429 {
+                let retryAfterHeader = http.value(forHTTPHeaderField: "Retry-After")
+                let retrySeconds = retryAfterHeader.flatMap(Double.init) ?? 30
+                let delay = max(retrySeconds, pollInterval)
+                DebugLog.shared.log("[Poll] 429レート制限。\(Int(delay))秒待って再試行します")
+                return delay
+            }
 
             if http.statusCode == 204 {
                 DebugLog.shared.log("[Poll] 204: 再生中の曲なし")
                 currentTrack = nil
                 isPlaying = false
-                return
+                return nil
             }
             guard http.statusCode == 200 else {
                 let bodyPreview = String(data: data.prefix(300), encoding: .utf8) ?? "(バイナリ/デコード不可)"
                 DebugLog.shared.log("[Poll] エラー応答本文: \(bodyPreview)")
-                return
+                return nil
             }
 
             let decoded = try JSONDecoder().decode(CurrentlyPlayingResponse.self, from: data)
@@ -94,7 +105,7 @@ final class PlaybackPoller: ObservableObject {
                 DebugLog.shared.log("[Poll] itemがnull(再生停止中?)")
                 currentTrack = nil
                 isPlaying = false
-                return
+                return nil
             }
 
             let track = CurrentTrack(
@@ -112,10 +123,12 @@ final class PlaybackPoller: ObservableObject {
             basePositionMs = decoded.progressMs ?? 0
             basePollDate = Date()
             estimatedPositionMs = basePositionMs
+            return nil
         } catch {
             // Transient network/auth failure — the next poll cycle retries.
             // A persistent failure surfaces via sessionClient.lastError (cookie invalidated).
             DebugLog.shared.log("[Poll] 例外: \(error.localizedDescription)")
+            return nil
         }
     }
 }
