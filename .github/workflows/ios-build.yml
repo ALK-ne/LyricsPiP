@@ -44,6 +44,11 @@ jobs:
           fi
           xcodebuild -version
 
+      - name: Debug - effective build settings for CURRENT_PROJECT_VERSION
+        run: |
+          xcodebuild -project LyricsPiP.xcodeproj -scheme LyricsPiP -sdk iphoneos -configuration Release -showBuildSettings \
+            | grep -iE "CURRENT_PROJECT_VERSION|GENERATE_INFOPLIST_FILE|INFOPLIST_FILE|VERSIONING_SYSTEM|MARKETING_VERSION"
+
       - name: Build unsigned .app
         run: |
           xcodebuild \
