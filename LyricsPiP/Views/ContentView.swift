@@ -36,13 +36,6 @@ struct ContentView: View {
                 DebugLogView()
             }
             .padding()
-            .safeAreaInset(edge: .top) {
-                Text(Self.versionString)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .padding(.horizontal)
-            }
             .navigationTitle("LyricsPiP")
             .sheet(isPresented: $showingLogin) {
                 SpotifyLoginSheet { cookie in
@@ -77,6 +70,11 @@ struct ContentView: View {
 
     private var loggedInView: some View {
         VStack(spacing: 16) {
+            Text(Self.versionString)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+
             if let until = poller.rateLimitedUntil, until > Date() {
                 Text("Spotifyのレート制限中です。\(Self.timeFormatter.string(from: until))頃まで自動では再試行しません。アプリを閉じずにお待ちください。")
                     .font(.footnote)
