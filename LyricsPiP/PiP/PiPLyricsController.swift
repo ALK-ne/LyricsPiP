@@ -22,6 +22,7 @@ final class PiPLyricsController: NSObject, ObservableObject {
     private var displayLayer: AVSampleBufferDisplayLayer?
     private var silencePlayer: AVAudioPlayer?
     private var cancellables = Set<AnyCancellable>()
+    private var pendingStartWaitTask: Task<Void, Never>?
 
     private var latestCurrentText: String?
     private var latestNextText: String?
@@ -42,13 +43,49 @@ final class PiPLyricsController: NSObject, ObservableObject {
     }
 
     func start() {
+        DebugLog.shared.log("[PiP] start() 呼び出し")
         configureAudioSession()
         setUpPiPControllerIfNeeded()
         playSilenceLoop()
-        pipController?.startPictureInPicture()
+
+        guard let pipController else {
+            DebugLog.shared.log("[PiP] pipControllerがnil。開始できません(デバイス非対応?)")
+            return
+        }
+
+        // `AVPictureInPictureController.isPictureInPicturePossible` becomes
+        // true asynchronously once the content source has real content
+        // flowing — calling startPictureInPicture() before that is true
+        // fails *silently* (no error, no delegate call), which is exactly
+        // what looked like "the button does nothing".
+        if pipController.isPictureInPicturePossible {
+            DebugLog.shared.log("[PiP] isPictureInPicturePossible=true、即座に開始")
+            pipController.startPictureInPicture()
+        } else {
+            DebugLog.shared.log("[PiP] isPictureInPicturePossible=false。準備が整うのを待ちます")
+            waitForPossibleThenStart()
+        }
+    }
+
+    private func waitForPossibleThenStart() {
+        pendingStartWaitTask?.cancel()
+        pendingStartWaitTask = Task { [weak self] in
+            guard let self else { return }
+            for _ in 0..<50 { // poll for up to ~5 seconds
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                if Task.isCancelled { return }
+                if let pc = self.pipController, pc.isPictureInPicturePossible {
+                    DebugLog.shared.log("[PiP] isPictureInPicturePossibleがtrueになったので開始")
+                    pc.startPictureInPicture()
+                    return
+                }
+            }
+            DebugLog.shared.log("[PiP] 5秒待ってもisPictureInPicturePossibleがfalseのまま。開始を諦めます")
+        }
     }
 
     func stop() {
+        pendingStartWaitTask?.cancel()
         pipController?.stopPictureInPicture()
         silencePlayer?.stop()
     }
@@ -72,7 +109,10 @@ final class PiPLyricsController: NSObject, ObservableObject {
 
     private func setUpPiPControllerIfNeeded() {
         guard pipController == nil else { return }
-        guard AVPictureInPictureController.isPictureInPictureSupported() else { return }
+        guard AVPictureInPictureController.isPictureInPictureSupported() else {
+            DebugLog.shared.log("[PiP] このデバイス/OSはPIP非対応です")
+            return
+        }
 
         let layer = AVSampleBufferDisplayLayer()
         layer.videoGravity = .resizeAspect
@@ -86,6 +126,7 @@ final class PiPLyricsController: NSObject, ObservableObject {
         controller.delegate = self
         pipController = controller
         isPiPPossible = true
+        DebugLog.shared.log("[PiP] コントローラーのセットアップ完了")
     }
 
     private func updateFrame(activeIndex: Int?, lines: [LyricLine]) {
@@ -113,11 +154,26 @@ final class PiPLyricsController: NSObject, ObservableObject {
 
 extension PiPLyricsController: AVPictureInPictureControllerDelegate {
     nonisolated func pictureInPictureControllerDidStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-        Task { @MainActor in self.isPiPActive = true }
+        Task { @MainActor in
+            DebugLog.shared.log("[PiP] 開始成功")
+            self.isPiPActive = true
+        }
     }
 
     nonisolated func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-        Task { @MainActor in self.isPiPActive = false }
+        Task { @MainActor in
+            DebugLog.shared.log("[PiP] 停止")
+            self.isPiPActive = false
+        }
+    }
+
+    nonisolated func pictureInPictureController(
+        _ pictureInPictureController: AVPictureInPictureController,
+        failedToStartPictureInPictureWithError error: Error
+    ) {
+        Task { @MainActor in
+            DebugLog.shared.log("[PiP] 開始失敗: \(error.localizedDescription)")
+        }
     }
 }
 

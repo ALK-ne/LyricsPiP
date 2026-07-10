@@ -76,7 +76,7 @@ struct ContentView: View {
             .font(.footnote)
 
             LyricsPreviewView(
-                hasTrack: poller.currentTrack != nil,
+                hasTrack: poller.currentTrack != nil || !syncEngine.lines.isEmpty,
                 lines: syncEngine.lines,
                 activeIndex: syncEngine.activeIndex,
                 noLyricsFound: syncEngine.noLyricsFound
