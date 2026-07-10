@@ -7,7 +7,7 @@ options:
 
 packages:
   LyricsPiPCore:
-    path: ../LyricsPiPCore
+    path: LyricsPiPCore
 
 settings:
   base:
