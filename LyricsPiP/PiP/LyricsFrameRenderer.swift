@@ -10,7 +10,10 @@ enum LyricsFrameRenderer {
     static func renderImage(currentLine: String?, nextLine: String?) -> CGImage? {
         let renderer = UIGraphicsImageRenderer(size: frameSize)
         let image = renderer.image { _ in
-            UIColor.black.setFill()
+            // TEMP DEBUG: bright green instead of black, to check whether
+            // any rendered color at all is reaching the PIP window before
+            // debugging text visibility specifically.
+            UIColor(red: 0, green: 1, blue: 0, alpha: 1).setFill()
             UIRectFill(CGRect(origin: .zero, size: frameSize))
 
             let paragraph = NSMutableParagraphStyle()
