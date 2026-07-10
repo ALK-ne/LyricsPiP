@@ -55,6 +55,7 @@ struct ContentView: View {
             trackHeader
 
             LyricsPreviewView(
+                hasTrack: poller.currentTrack != nil,
                 lines: syncEngine.lines,
                 activeIndex: syncEngine.activeIndex,
                 noLyricsFound: syncEngine.noLyricsFound

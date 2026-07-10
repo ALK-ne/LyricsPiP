@@ -1,12 +1,15 @@
 import SwiftUI
 
 struct LyricsPreviewView: View {
+    let hasTrack: Bool
     let lines: [LyricLine]
     let activeIndex: Int?
     let noLyricsFound: Bool
 
     var body: some View {
-        if noLyricsFound {
+        if !hasTrack {
+            EmptyView()
+        } else if noLyricsFound {
             Text("同期歌詞が見つかりませんでした")
                 .foregroundStyle(.secondary)
                 .padding()

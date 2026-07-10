@@ -64,6 +64,16 @@ final class SpotifyWebSessionClient: ObservableObject {
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
             forHTTPHeaderField: "User-Agent"
         )
+        // A real browser XHR from open.spotify.com's own web player includes
+        // these headers; without them Spotify's edge/WAF is treating the
+        // request as automated traffic and returning 403.
+        request.setValue("https://open.spotify.com/", forHTTPHeaderField: "Referer")
+        request.setValue("https://open.spotify.com", forHTTPHeaderField: "Origin")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
+        request.setValue("empty", forHTTPHeaderField: "Sec-Fetch-Dest")
+        request.setValue("cors", forHTTPHeaderField: "Sec-Fetch-Mode")
+        request.setValue("same-origin", forHTTPHeaderField: "Sec-Fetch-Site")
 
         let data: Data
         let response: URLResponse
