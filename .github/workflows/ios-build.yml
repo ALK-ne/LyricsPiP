@@ -12,26 +12,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install XcodeGen
-        run: brew install xcodegen
-
-      - name: Bake build number into project.yml
-        # CURRENT_PROJECT_VERSION passed as an xcodebuild command-line
-        # override does NOT reliably reach the Info.plist $(CURRENT_PROJECT_VERSION)
-        # substitution in this project (confirmed: xcodebuild's own
-        # "Command line invocation" echo shows the override was received,
-        # but the compiled Info.plist still had CFBundleVersion=1). Baking
-        # it into project.yml before generation makes it a real target
-        # build setting instead, sidestepping that override-ordering issue.
-        run: |
-          sed -i '' "s/CURRENT_PROJECT_VERSION: \"0\"/CURRENT_PROJECT_VERSION: \"${{ github.run_number }}\"/" project.yml
-          grep CURRENT_PROJECT_VERSION project.yml
-
       - name: Generate Xcode project
         run: xcodegen generate
-
-      - name: Debug - dump CURRENT_PROJECT_VERSION from generated pbxproj
-        run: grep -n "CURRENT_PROJECT_VERSION" LyricsPiP.xcodeproj/project.pbxproj
 
       - name: List available Xcode versions
         run: ls /Applications | grep Xcode
@@ -43,11 +25,6 @@ jobs:
             sudo xcode-select -s "$LATEST"
           fi
           xcodebuild -version
-
-      - name: Debug - effective build settings for CURRENT_PROJECT_VERSION
-        run: |
-          xcodebuild -project LyricsPiP.xcodeproj -scheme LyricsPiP -sdk iphoneos -configuration Release -showBuildSettings \
-            | grep -iE "CURRENT_PROJECT_VERSION|GENERATE_INFOPLIST_FILE|INFOPLIST_FILE|VERSIONING_SYSTEM|MARKETING_VERSION"
 
       - name: Build unsigned .app
         run: |
@@ -61,9 +38,18 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             clean build
 
-      - name: Debug - read Info.plist directly from built .app on runner
+      - name: Set CFBundleVersion directly in the built Info.plist
+        # $(CURRENT_PROJECT_VERSION) substitution during Xcode's Info.plist
+        # processing does not reflect the real build setting in this project
+        # for reasons that were never root-caused (confirmed via pbxproj dump,
+        # xcodebuild -showBuildSettings, and reading the plist straight off
+        # the runner -- all show the correct value except the final compiled
+        # plist, which is always "1"). Patching the value directly into the
+        # already-built Info.plist sidesteps that substitution entirely.
         run: |
-          /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "build/Build/Products/Release-iphoneos/LyricsPiP.app/Info.plist"
+          APP_INFO_PLIST="build/Build/Products/Release-iphoneos/LyricsPiP.app/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" "$APP_INFO_PLIST"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP_INFO_PLIST"
 
       - name: Package .ipa
         run: |
