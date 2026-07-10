@@ -39,6 +39,7 @@ jobs:
             -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
+            CI_BUILD_NUMBER="${{ github.run_number }}" \
             clean build
 
       - name: Package .ipa

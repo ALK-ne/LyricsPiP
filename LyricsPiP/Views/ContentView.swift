@@ -14,6 +14,16 @@ struct ContentView: View {
         return formatter
     }()
 
+    /// CFBundleVersion is set to the GitHub Actions run number at build time
+    /// (see .github/workflows/ios-build.yml), so this identifies exactly
+    /// which CI build is currently installed.
+    private static var versionString: String {
+        let info = Bundle.main.infoDictionary
+        let shortVersion = info?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info?["CFBundleVersion"] as? String ?? "?"
+        return "v\(shortVersion) (build \(build))"
+    }
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 16) {
@@ -26,6 +36,13 @@ struct ContentView: View {
                 DebugLogView()
             }
             .padding()
+            .safeAreaInset(edge: .top) {
+                Text(Self.versionString)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .padding(.horizontal)
+            }
             .navigationTitle("LyricsPiP")
             .sheet(isPresented: $showingLogin) {
                 SpotifyLoginSheet { cookie in

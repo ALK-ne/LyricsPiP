@@ -10,10 +10,7 @@ enum LyricsFrameRenderer {
     static func renderImage(currentLine: String?, nextLine: String?) -> CGImage? {
         let renderer = UIGraphicsImageRenderer(size: frameSize)
         let image = renderer.image { _ in
-            // TEMP DEBUG: bright green instead of black, to check whether
-            // any rendered color at all is reaching the PIP window before
-            // debugging text visibility specifically.
-            UIColor(red: 0, green: 1, blue: 0, alpha: 1).setFill()
+            UIColor.black.setFill()
             UIRectFill(CGRect(origin: .zero, size: frameSize))
 
             let paragraph = NSMutableParagraphStyle()
@@ -44,9 +41,14 @@ enum LyricsFrameRenderer {
 
     static func makeSampleBuffer(from cgImage: CGImage, presentationTime: CMTime) -> CMSampleBuffer? {
         var pixelBuffer: CVPixelBuffer?
+        // kCVPixelBufferIOSurfacePropertiesKey is required (not optional) for
+        // buffers that need to be composited by the system outside this
+        // process, like a PIP window — without it, enqueue() succeeds and no
+        // error is ever raised, but nothing actually renders on screen.
         let attrs: [CFString: Any] = [
             kCVPixelBufferCGImageCompatibilityKey: true,
-            kCVPixelBufferCGBitmapContextCompatibilityKey: true
+            kCVPixelBufferCGBitmapContextCompatibilityKey: true,
+            kCVPixelBufferIOSurfacePropertiesKey: [:] as CFDictionary
         ]
         let width = cgImage.width
         let height = cgImage.height

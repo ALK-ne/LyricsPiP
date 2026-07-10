@@ -15,6 +15,9 @@ settings:
     CODE_SIGN_STYLE: Manual
     CODE_SIGNING_ALLOWED: NO
     CODE_SIGNING_REQUIRED: NO
+    # Overridden by CI (xcodebuild ... CI_BUILD_NUMBER=<run number>) so each
+    # build is identifiable in-app. "0" is the local/non-CI default.
+    CI_BUILD_NUMBER: "0"
 
 targets:
   LyricsPiP:
