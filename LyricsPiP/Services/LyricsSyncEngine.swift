@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import LyricsPiPCore
 
 /// Combines the currently-playing track/position from `PlaybackPoller` with
 /// lyrics fetched from `LyricsService` to expose "which line is active right now".
@@ -73,25 +74,6 @@ final class LyricsSyncEngine: ObservableObject {
     }
 
     private func updateActiveIndex(positionMs: Int) {
-        guard !lines.isEmpty else {
-            activeIndex = nil
-            return
-        }
-        let positionSeconds = TimeInterval(positionMs) / 1000
-
-        // Find the last line whose timestamp is <= the current position.
-        var low = 0
-        var high = lines.count - 1
-        var result: Int?
-        while low <= high {
-            let mid = (low + high) / 2
-            if lines[mid].time <= positionSeconds {
-                result = mid
-                low = mid + 1
-            } else {
-                high = mid - 1
-            }
-        }
-        activeIndex = result
+        activeIndex = ActiveLineFinder.activeIndex(in: lines, positionMs: positionMs)
     }
 }

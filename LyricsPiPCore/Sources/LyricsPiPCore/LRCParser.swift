@@ -1,9 +1,9 @@
 import Foundation
 
-enum LRCParser {
+public enum LRCParser {
     /// Parses standard `[mm:ss.xx]lyric text` LRC lines into a sorted array.
     /// Lines without a valid timestamp (metadata tags like `[ar:Artist]`) are skipped.
-    static func parse(_ lrcText: String) -> [LyricLine] {
+    public static func parse(_ lrcText: String) -> [LyricLine] {
         let pattern = #"^\[(\d{2}):(\d{2})(?:\.(\d{1,3}))?\](.*)$"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
 

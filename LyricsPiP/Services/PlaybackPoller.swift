@@ -1,4 +1,5 @@
 import Foundation
+import LyricsPiPCore
 
 /// Polls Spotify's official `/me/player/currently-playing` Web API endpoint
 /// (authenticated via the sp_dc-derived Bearer token from `SpotifyWebSessionClient`)

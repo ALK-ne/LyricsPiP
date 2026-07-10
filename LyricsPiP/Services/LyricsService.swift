@@ -1,4 +1,5 @@
 import Foundation
+import LyricsPiPCore
 
 /// Fetches time-synced lyrics from lrclib.net's free public API.
 /// Chosen over Spotify's private internal lyrics endpoint since it doesn't

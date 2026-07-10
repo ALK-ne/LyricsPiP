@@ -5,6 +5,10 @@ options:
     iOS: "17.0"
   createIntermediateGroups: true
 
+packages:
+  LyricsPiPCore:
+    path: ../LyricsPiPCore
+
 settings:
   base:
     SWIFT_VERSION: "5.0"
@@ -38,6 +42,8 @@ targets:
     entitlements:
       path: LyricsPiP/App/LyricsPiP.entitlements
       properties: {}
+    dependencies:
+      - package: LyricsPiPCore
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.lyricspip.app2

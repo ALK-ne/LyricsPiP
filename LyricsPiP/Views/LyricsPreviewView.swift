@@ -1,4 +1,5 @@
 import SwiftUI
+import LyricsPiPCore
 
 struct LyricsPreviewView: View {
     let hasTrack: Bool

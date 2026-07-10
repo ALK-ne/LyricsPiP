@@ -2,6 +2,7 @@ import AVKit
 import AVFoundation
 import Combine
 import CoreMedia
+import LyricsPiPCore
 
 /// Owns the custom-content `AVPictureInPictureController` that floats the
 /// lyrics over other apps (including Spotify itself) and the home screen.
