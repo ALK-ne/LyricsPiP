@@ -85,11 +85,17 @@ struct ContentView: View {
 
             // Must actually be part of the rendered view hierarchy for
             // AVPictureInPictureController.isPictureInPicturePossible to ever
-            // become true — see PiPDisplayLayerView.swift. Kept tiny/unobtrusive
-            // rather than hidden(), since hidden() removes it from the render tree.
+            // become true — see PiPDisplayLayerView.swift. A prior 4x4/near-
+            // invisible size may itself have been the cause of the PIP window
+            // rendering solid black, so this is now a real, visible mini
+            // preview at a reasonable size (also useful as a UX bonus).
             PiPHostView(controller: pipController)
-                .frame(width: 4, height: 4)
-                .opacity(0.01)
+                .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                .frame(width: 160)
+                .background(Color.black)
+                .overlay(alignment: .topLeading) {
+                    Text("PIPプレビュー").font(.caption2).foregroundStyle(.secondary).padding(2)
+                }
 
             Button(pipController.isPiPActive ? "PIPを閉じる" : "PIPで表示") {
                 if pipController.isPiPActive {
