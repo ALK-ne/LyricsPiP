@@ -50,11 +50,22 @@ final class LyricsSyncEngine: ObservableObject {
         }
         guard track.id != currentTrackId else { return }
 
-        currentTrackId = track.id
+        // Moving to a different track — drop the previous lyrics right away.
         lines = []
         activeIndex = nil
         noLyricsFound = false
 
+        // lrclib needs a real artist + title. Rapid skips (and reconnect churn)
+        // can surface a track before its artist_name hydrates into the cluster;
+        // fetching then would 400 and lock in a "no lyrics" result. Defer until
+        // a fuller update arrives — leaving currentTrackId uncommitted so that
+        // update (or a return to this track) still triggers the fetch.
+        guard !track.artist.isEmpty else {
+            currentTrackId = nil
+            return
+        }
+
+        currentTrackId = track.id
         logger.log("[Lyrics] 取得開始: \(track.name) / \(track.artist)")
         fetchTask = Task { [weak self] in
             guard let self else { return }

@@ -30,6 +30,11 @@ final class PlaybackWatcher: ObservableObject {
 
     private var webSocket: URLSessionWebSocketTask?
     private var connectionId: String?
+    private var quickRefreshTask: Task<Void, Never>?
+    // Bounds the fast follow-up refreshes used to catch not-yet-hydrated
+    // artist metadata, so a track that genuinely has no artist can't spin.
+    private var partialRefreshCount = 0
+    private let maxPartialRefreshes = 3
     private var spclientHost = "gae2-spclient.spotify.com:443"
     // A stable per-process device id so repeated connect-state PUTs update the
     // same hidden "device" instead of registering a new one each time.
@@ -127,6 +132,7 @@ final class PlaybackWatcher: ObservableObject {
     private func teardownConnection() {
         pingTask?.cancel(); pingTask = nil
         safetyTask?.cancel(); safetyTask = nil
+        quickRefreshTask?.cancel(); quickRefreshTask = nil
         webSocket?.cancel(with: .goingAway, reason: nil)
         webSocket = nil
         connectionId = nil
@@ -216,15 +222,25 @@ final class PlaybackWatcher: ObservableObject {
         // Guard against transient partial cluster updates dropping artist/title
         // for the track that's already playing (see TrackMetadataMerge).
         let resolved = TrackMetadataMerge.resolve(existing: currentTrack, incoming: snapshot.track)
-        if resolved?.id != currentTrack?.id {
+        let isNewTrack = resolved?.id != currentTrack?.id
+        if isNewTrack {
             if let t = resolved {
                 logger.log("[Watch] 曲検知: \(t.name) / \(t.artist)")
             }
             currentTrack = resolved
+            partialRefreshCount = 0
         } else if resolved != currentTrack {
             // Same track, richer metadata (e.g. artist filled back in) — update
             // quietly without re-logging a "song detected" line.
             currentTrack = resolved
+        }
+
+        // If the artist hasn't hydrated yet (common right after a rapid skip),
+        // pull a fresh cluster shortly after — hydration doesn't always emit its
+        // own push. Bounded so a track with genuinely no artist can't loop.
+        if let t = currentTrack, !t.name.isEmpty, t.artist.isEmpty, partialRefreshCount < maxPartialRefreshes {
+            partialRefreshCount += 1
+            scheduleQuickRefresh()
         }
 
         // position_as_of_timestamp was measured at snapshot.timestampMs (Spotify
@@ -235,6 +251,15 @@ final class PlaybackWatcher: ObservableObject {
         let anchored = snapshot.positionMs + transit
         interpolator.rebase(positionMs: anchored, at: Date())
         estimatedPositionMs = anchored
+    }
+
+    private func scheduleQuickRefresh() {
+        quickRefreshTask?.cancel()
+        quickRefreshTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard let self, !Task.isCancelled, self.connectionId != nil else { return }
+            await self.refreshClusterState()
+        }
     }
 
     private func resolveSpclientHost(token: String) async {
