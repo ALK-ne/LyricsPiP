@@ -38,8 +38,18 @@ struct ContentView: View {
             }
             .onAppear {
                 pipController.attach(syncEngine: syncEngine)
-                pipController.prepare()
             }
+            // The display layer must stay in the rendered view hierarchy for
+            // AVPictureInPictureController.isPictureInPicturePossible to become
+            // true, but there's no visible PiP control anymore -- PiP starts/
+            // stops automatically as the app backgrounds/foregrounds. Keep it
+            // as a tiny, near-invisible layer with no layout footprint.
+            .background(
+                PiPHostView(controller: pipController)
+                    .frame(width: 48, height: 16)
+                    .opacity(0.02)
+                    .allowsHitTesting(false)
+            )
         }
     }
 
@@ -78,28 +88,6 @@ struct ContentView: View {
                 noLyricsFound: syncEngine.noLyricsFound
             )
             .frame(maxHeight: .infinity)
-
-            Button(pipController.isPiPActive ? "PIPを閉じる" : "PIPで表示") {
-                if pipController.isPiPActive {
-                    pipController.stop()
-                } else {
-                    pipController.start()
-                }
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(syncEngine.lines.isEmpty || !pipController.isPiPPossible)
-            // The display layer must stay in the rendered view hierarchy for
-            // AVPictureInPictureController.isPictureInPicturePossible to become
-            // true, but the user doesn't want a visible preview. Keep it as a
-            // tiny, near-invisible layer tucked behind the (opaque) button — it
-            // takes no layout space and the PiP window's size comes from the
-            // rendered frame, not this host view.
-            .background(
-                PiPHostView(controller: pipController)
-                    .frame(width: 48, height: 16)
-                    .opacity(0.02)
-                    .allowsHitTesting(false)
-            )
 
             if let error = sessionClient.lastError {
                 Text(error)

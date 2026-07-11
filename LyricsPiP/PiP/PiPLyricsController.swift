@@ -17,7 +17,6 @@ import LyricsPiPCore
 @MainActor
 final class PiPLyricsController: NSObject, ObservableObject {
     @Published private(set) var isPiPActive = false
-    @Published private(set) var isPiPPossible = false
 
     private let logger: any LyricsPiPLogging
 
@@ -25,7 +24,6 @@ final class PiPLyricsController: NSObject, ObservableObject {
     private var displayLayer: AVSampleBufferDisplayLayer?
     private var silencePlayer: AVAudioPlayer?
     private var cancellables = Set<AnyCancellable>()
-    private var pendingStartWaitTask: Task<Void, Never>?
 
     private var latestCurrentText: String?
     private var latestNextText: String?
@@ -94,9 +92,9 @@ final class PiPLyricsController: NSObject, ObservableObject {
     /// Arms automatic PiP-on-background: activates the (mixed) audio session,
     /// ensures the PiP controller exists with content already flowing, and
     /// opts in to `canStartPictureInPictureAutomaticallyFromInline` so iOS
-    /// starts PiP itself when the app backgrounds -- no button tap required.
-    /// The manual "PIPで表示" button is kept as a fallback while this is
-    /// unverified on device; both paths share this same setup.
+    /// starts PiP itself when the app backgrounds. This is the only way PiP
+    /// starts now -- verified on device across several background/foreground
+    /// patterns, so the manual start/stop button was removed.
     private func prepareForAutoStart() {
         // Once armed, this is a no-op — otherwise configureAudioSession's log
         // line (and the redundant setup work) would fire on every ~0.2s
@@ -132,63 +130,6 @@ final class PiPLyricsController: NSObject, ObservableObject {
         setUpPiPControllerIfNeeded()
     }
 
-    /// Kept as a no-op call site for ContentView's onAppear — actual setup
-    /// now happens once `attachDisplayLayer` provides a real, view-hosted layer.
-    func prepare() {}
-
-    func start() {
-        logger.log("[PiP] start() 呼び出し")
-        configureAudioSession()
-        setUpPiPControllerIfNeeded()
-        playSilenceLoop()
-
-        // Guarantee the layer has content before starting PiP (empty layer =>
-        // PGPegasusErrorDomain -1003). Render the current lyric state now, even
-        // if no line is active yet (renders the "♪" placeholder).
-        updateFrame(activeIndex: latestActiveIndex, lines: latestLines)
-
-        guard let pipController else {
-            logger.log("[PiP] pipControllerがnil。開始できません(デバイス非対応?)")
-            return
-        }
-
-        // `AVPictureInPictureController.isPictureInPicturePossible` becomes
-        // true asynchronously once the content source has real content
-        // flowing — calling startPictureInPicture() before that is true
-        // fails *silently* (no error, no delegate call), which is exactly
-        // what looked like "the button does nothing".
-        if pipController.isPictureInPicturePossible {
-            logger.log("[PiP] isPictureInPicturePossible=true、即座に開始")
-            pipController.startPictureInPicture()
-        } else {
-            logger.log("[PiP] isPictureInPicturePossible=false。準備が整うのを待ちます")
-            waitForPossibleThenStart()
-        }
-    }
-
-    private func waitForPossibleThenStart() {
-        pendingStartWaitTask?.cancel()
-        pendingStartWaitTask = Task { [weak self] in
-            guard let self else { return }
-            for _ in 0..<50 { // poll for up to ~5 seconds
-                try? await Task.sleep(nanoseconds: 100_000_000)
-                if Task.isCancelled { return }
-                if let pc = self.pipController, pc.isPictureInPicturePossible {
-                    self.logger.log("[PiP] isPictureInPicturePossibleがtrueになったので開始")
-                    pc.startPictureInPicture()
-                    return
-                }
-            }
-            self.logger.log("[PiP] 5秒待ってもisPictureInPicturePossibleがfalseのまま。開始を諦めます")
-        }
-    }
-
-    func stop() {
-        pendingStartWaitTask?.cancel()
-        pipController?.stopPictureInPicture()
-        silencePlayer?.stop()
-    }
-
     private func configureAudioSession() {
         let session = AVAudioSession.sharedInstance()
         do {
@@ -207,9 +148,9 @@ final class PiPLyricsController: NSObject, ObservableObject {
     }
 
     private func playSilenceLoop() {
-        // Checks isPlaying (not just nil) so this correctly resumes after the
-        // manual "PIPを閉じる" button stops it — called repeatedly from
-        // prepareForAutoStart, which must be able to re-arm after a manual stop.
+        // Plays indefinitely once started — nothing stops it, since it needs
+        // to keep the audio session alive persistently for PiP to be able to
+        // auto-start on every future backgrounding, not just the first one.
         guard silencePlayer?.isPlaying != true else { return }
         guard let url = Bundle.main.url(forResource: "silence", withExtension: "m4a") else { return }
         silencePlayer = try? AVAudioPlayer(contentsOf: url)
@@ -239,7 +180,6 @@ final class PiPLyricsController: NSObject, ObservableObject {
         let controller = AVPictureInPictureController(contentSource: contentSource)
         controller.delegate = self
         pipController = controller
-        isPiPPossible = true
         logger.log("[PiP] コントローラーのセットアップ完了")
     }
 
