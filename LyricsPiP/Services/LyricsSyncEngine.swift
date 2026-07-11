@@ -3,24 +3,31 @@ import Combine
 import LyricsPiPCore
 
 /// Combines the currently-playing track/position from `PlaybackWatcher` with
-/// lyrics fetched from `LyricsService` to expose "which line is active right now".
+/// lyrics to expose "which line is active right now". Lyrics come from Spotify's
+/// own synced lyrics first (keyed by track id, matches the Spotify app), falling
+/// back to lrclib when Spotify has none.
 @MainActor
 final class LyricsSyncEngine: ObservableObject {
     @Published private(set) var lines: [LyricLine] = []
     @Published private(set) var activeIndex: Int?
     @Published private(set) var noLyricsFound: Bool = false
 
+    private let spotifyLyrics: SpotifyLyricsService
     private let lyricsService: LyricsService
     private let logger: any LyricsPiPLogging
     private var cancellables = Set<AnyCancellable>()
-    private var currentTrackId: String?
+    /// The track id we've SUCCESSFULLY loaded lyrics for (nil while unresolved),
+    /// so an artist-filled retry or a repeat event doesn't refetch needlessly.
+    private var loadedTrackId: String?
     private var fetchTask: Task<Void, Never>?
 
     init(
         watcher: PlaybackWatcher,
+        spotifyLyrics: SpotifyLyricsService,
         lyricsService: LyricsService? = nil,
         logger: (any LyricsPiPLogging)? = nil
     ) {
+        self.spotifyLyrics = spotifyLyrics
         self.lyricsService = lyricsService ?? LyricsService()
         self.logger = logger ?? DebugLog.shared
 
@@ -42,33 +49,42 @@ final class LyricsSyncEngine: ObservableObject {
         fetchTask?.cancel()
 
         guard let track else {
-            currentTrackId = nil
+            loadedTrackId = nil
             lines = []
             activeIndex = nil
             noLyricsFound = false
             return
         }
-        guard track.id != currentTrackId else { return }
+        // Already have lyrics loaded for this exact track — nothing to do
+        // (guards against the artist-filled retry event and repeat pushes).
+        guard track.id != loadedTrackId else { return }
 
-        // Moving to a different track — drop the previous lyrics right away.
+        // New/unresolved track — drop the previous lyrics right away.
         lines = []
         activeIndex = nil
         noLyricsFound = false
 
-        // lrclib needs a real artist + title. Rapid skips (and reconnect churn)
-        // can surface a track before its artist_name hydrates into the cluster;
-        // fetching then would 400 and lock in a "no lyrics" result. Defer until
-        // a fuller update arrives — leaving currentTrackId uncommitted so that
-        // update (or a return to this track) still triggers the fetch.
-        guard !track.artist.isEmpty else {
-            currentTrackId = nil
-            return
-        }
-
-        currentTrackId = track.id
-        logger.log("[Lyrics] 取得開始: \(track.name) / \(track.artist)")
         fetchTask = Task { [weak self] in
             guard let self else { return }
+
+            // 1. Spotify's own synced lyrics — keyed by track id, so no artist
+            //    needed and coverage matches the Spotify app. Try this first.
+            if let spotify = try? await self.spotifyLyrics.fetchSyncedLyrics(trackId: track.id),
+               !spotify.isEmpty {
+                guard !Task.isCancelled else { return }
+                self.logger.log("[Lyrics] Spotify歌詞: \(spotify.count)行 (\(track.name))")
+                self.lines = spotify
+                self.loadedTrackId = track.id
+                return
+            }
+
+            // 2. lrclib fallback — needs a real artist. During playlist playback
+            //    artist_name arrives a beat later (resolved separately); if it's
+            //    not here yet, stop and let the artist-filled update retry.
+            guard !track.artist.isEmpty else {
+                self.logger.log("[Lyrics] Spotify歌詞なし、アーティスト解決待ち: \(track.name)")
+                return
+            }
             do {
                 let fetched = try await self.lyricsService.fetchSyncedLyrics(
                     artist: track.artist,
@@ -76,17 +92,18 @@ final class LyricsSyncEngine: ObservableObject {
                     album: track.album,
                     durationMs: track.durationMs
                 )
-                guard !Task.isCancelled, track.id == self.currentTrackId else { return }
+                guard !Task.isCancelled else { return }
                 if let fetched, !fetched.isEmpty {
-                    self.logger.log("[Lyrics] 取得成功: \(fetched.count)行")
+                    self.logger.log("[Lyrics] lrclib歌詞: \(fetched.count)行 (\(track.name))")
                     self.lines = fetched
+                    self.loadedTrackId = track.id
                 } else {
-                    self.logger.log("[Lyrics] 同期歌詞なし")
+                    self.logger.log("[Lyrics] 同期歌詞なし(Spotify/lrclib両方): \(track.name)")
                     self.noLyricsFound = true
                 }
             } catch {
-                guard !Task.isCancelled, track.id == self.currentTrackId else { return }
-                self.logger.log("[Lyrics] 取得失敗: \(error.localizedDescription)")
+                guard !Task.isCancelled else { return }
+                self.logger.log("[Lyrics] lrclib取得失敗: \(error.localizedDescription)")
                 self.noLyricsFound = true
             }
         }

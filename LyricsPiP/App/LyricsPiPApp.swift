@@ -9,9 +9,10 @@ struct LyricsPiPApp: App {
     init() {
         let session = SpotifyWebSessionClient()
         let watcher = PlaybackWatcher(sessionClient: session)
+        let spotifyLyrics = SpotifyLyricsService(sessionClient: session)
         _sessionClient = StateObject(wrappedValue: session)
         _watcher = StateObject(wrappedValue: watcher)
-        _syncEngine = StateObject(wrappedValue: LyricsSyncEngine(watcher: watcher))
+        _syncEngine = StateObject(wrappedValue: LyricsSyncEngine(watcher: watcher, spotifyLyrics: spotifyLyrics))
     }
 
     var body: some Scene {

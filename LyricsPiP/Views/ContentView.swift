@@ -133,5 +133,8 @@ struct ContentView: View {
     ContentView()
         .environmentObject(SpotifyWebSessionClient())
         .environmentObject(PlaybackWatcher(sessionClient: SpotifyWebSessionClient()))
-        .environmentObject(LyricsSyncEngine(watcher: PlaybackWatcher(sessionClient: SpotifyWebSessionClient())))
+        .environmentObject(LyricsSyncEngine(
+            watcher: PlaybackWatcher(sessionClient: SpotifyWebSessionClient()),
+            spotifyLyrics: SpotifyLyricsService(sessionClient: SpotifyWebSessionClient())
+        ))
 }

@@ -7,4 +7,9 @@ enum SpotifyWebConstants {
     /// present the same client identity.
     static let browserUserAgent =
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+
+    /// Default spclient host for the internal endpoints (connect-state,
+    /// color-lyrics, metadata). `apresolve` may return a region-specific host,
+    /// but this default works and avoids an extra round-trip.
+    static let defaultSpclientHost = "gae2-spclient.spotify.com:443"
 }
