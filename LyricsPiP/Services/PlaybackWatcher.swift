@@ -30,11 +30,7 @@ final class PlaybackWatcher: ObservableObject {
 
     private var webSocket: URLSessionWebSocketTask?
     private var connectionId: String?
-    private var quickRefreshTask: Task<Void, Never>?
-    // Bounds the fast follow-up refreshes used to catch not-yet-hydrated
-    // artist metadata, so a track that genuinely has no artist can't spin.
-    private var partialRefreshCount = 0
-    private let maxPartialRefreshes = 3
+    private var artistResolveTask: Task<Void, Never>?
     private var spclientHost = "gae2-spclient.spotify.com:443"
     // A stable per-process device id so repeated connect-state PUTs update the
     // same hidden "device" instead of registering a new one each time.
@@ -132,7 +128,7 @@ final class PlaybackWatcher: ObservableObject {
     private func teardownConnection() {
         pingTask?.cancel(); pingTask = nil
         safetyTask?.cancel(); safetyTask = nil
-        quickRefreshTask?.cancel(); quickRefreshTask = nil
+        artistResolveTask?.cancel(); artistResolveTask = nil
         webSocket?.cancel(with: .goingAway, reason: nil)
         webSocket = nil
         connectionId = nil
@@ -228,19 +224,17 @@ final class PlaybackWatcher: ObservableObject {
                 logger.log("[Watch] 曲検知: \(t.name) / \(t.artist)")
             }
             currentTrack = resolved
-            partialRefreshCount = 0
         } else if resolved != currentTrack {
             // Same track, richer metadata (e.g. artist filled back in) — update
             // quietly without re-logging a "song detected" line.
             currentTrack = resolved
         }
 
-        // If the artist hasn't hydrated yet (common right after a rapid skip),
-        // pull a fresh cluster shortly after — hydration doesn't always emit its
-        // own push. Bounded so a track with genuinely no artist can't loop.
-        if let t = currentTrack, !t.name.isEmpty, t.artist.isEmpty, partialRefreshCount < maxPartialRefreshes {
-            partialRefreshCount += 1
-            scheduleQuickRefresh()
+        // Playlist-context clusters omit artist_name (only artist_uri), which
+        // lrclib's /api/get rejects. Recover the authoritative artist name from
+        // Spotify's internal track-metadata endpoint (same non-rate-limited host).
+        if isNewTrack, let t = currentTrack, !t.name.isEmpty, t.artist.isEmpty {
+            resolveArtist(for: t)
         }
 
         // position_as_of_timestamp was measured at snapshot.timestampMs (Spotify
@@ -253,12 +247,40 @@ final class PlaybackWatcher: ObservableObject {
         estimatedPositionMs = anchored
     }
 
-    private func scheduleQuickRefresh() {
-        quickRefreshTask?.cancel()
-        quickRefreshTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
-            guard let self, !Task.isCancelled, self.connectionId != nil else { return }
-            await self.refreshClusterState()
+    /// Fills in a missing artist name by resolving the track URI against
+    /// Spotify's internal `metadata/4/track/<gid>` endpoint. Updates
+    /// `currentTrack` (which re-triggers the lyric fetch) only if we're still
+    /// on the same track when the answer comes back.
+    private func resolveArtist(for track: CurrentTrack) {
+        artistResolveTask?.cancel()
+        artistResolveTask = Task { [weak self] in
+            guard let self else { return }
+            guard let gid = SpotifyID.gidHex(fromBase62: track.id) else { return }
+            do {
+                let token = try await self.sessionClient.validAccessToken()
+                guard let url = URL(string: "https://\(self.spclientHost)/metadata/4/track/\(gid)?market=from_token") else { return }
+                var request = URLRequest(url: url)
+                request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+                request.setValue("application/json", forHTTPHeaderField: "Accept")
+                request.setValue(SpotifyWebConstants.browserUserAgent, forHTTPHeaderField: "User-Agent")
+
+                let (data, http) = try await self.httpClient.data(for: request)
+                guard http.statusCode == 200,
+                      let meta = try? JSONDecoder().decode(SpotifyTrackMetadata.self, from: data),
+                      let artistName = meta.artistName, !artistName.isEmpty else { return }
+                guard self.currentTrack?.id == track.id else { return }
+
+                self.currentTrack = CurrentTrack(
+                    id: track.id,
+                    name: track.name,
+                    artist: artistName,
+                    album: meta.albumName ?? track.album,
+                    durationMs: track.durationMs
+                )
+                self.logger.log("[Watch] アーティスト解決: \(track.name) / \(artistName)")
+            } catch {
+                self.logger.log("[Watch] アーティスト解決失敗: \(error.localizedDescription)")
+            }
         }
     }
 
