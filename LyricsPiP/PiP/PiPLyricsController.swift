@@ -28,6 +28,14 @@ final class PiPLyricsController: NSObject, ObservableObject {
 
     private var latestCurrentText: String?
     private var latestNextText: String?
+    private var latestLines: [LyricLine] = []
+    private var latestActiveIndex: Int?
+    // The display layer needs at least one enqueued frame before PiP can start;
+    // otherwise startPictureInPicture fails with PGPegasusErrorDomain -1003.
+    // Without this latch the very first frame is suppressed when there's no
+    // active lyric line yet (currentText nil == the initial nil), which left
+    // the layer empty if the user opened PiP before a line became active.
+    private var hasEnqueuedFrame = false
 
     init(logger: (any LyricsPiPLogging)? = nil) {
         self.logger = logger ?? DebugLog.shared
@@ -38,6 +46,8 @@ final class PiPLyricsController: NSObject, ObservableObject {
         syncEngine.$activeIndex
             .combineLatest(syncEngine.$lines)
             .sink { [weak self] activeIndex, lines in
+                self?.latestActiveIndex = activeIndex
+                self?.latestLines = lines
                 self?.updateFrame(activeIndex: activeIndex, lines: lines)
             }
             .store(in: &cancellables)
@@ -67,6 +77,11 @@ final class PiPLyricsController: NSObject, ObservableObject {
         configureAudioSession()
         setUpPiPControllerIfNeeded()
         playSilenceLoop()
+
+        // Guarantee the layer has content before starting PiP (empty layer =>
+        // PGPegasusErrorDomain -1003). Render the current lyric state now, even
+        // if no line is active yet (renders the "♪" placeholder).
+        updateFrame(activeIndex: latestActiveIndex, lines: latestLines)
 
         guard let pipController else {
             logger.log("[PiP] pipControllerがnil。開始できません(デバイス非対応?)")
@@ -165,7 +180,7 @@ final class PiPLyricsController: NSObject, ObservableObject {
         let nextIndex = activeIndex.map { $0 + 1 }
         let nextText = nextIndex.flatMap { lines.indices.contains($0) ? lines[$0].text : nil }
 
-        guard currentText != latestCurrentText || nextText != latestNextText else { return }
+        guard !hasEnqueuedFrame || currentText != latestCurrentText || nextText != latestNextText else { return }
         latestCurrentText = currentText
         latestNextText = nextText
 
@@ -190,6 +205,7 @@ final class PiPLyricsController: NSObject, ObservableObject {
             displayLayer.flush()
         }
         displayLayer.enqueue(sampleBuffer)
+        hasEnqueuedFrame = true
         logger.log("[PiP] フレーム表示: \"\(currentText ?? "")\"")
     }
 }
