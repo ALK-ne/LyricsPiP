@@ -112,8 +112,19 @@ final class PiPLyricsController: NSObject, ObservableObject {
 
     private func configureAudioSession() {
         let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playback, mode: .default, options: [])
-        try? session.setActive(true)
+        do {
+            // `.mixWithOthers` is essential here: without it, activating a
+            // `.playback` session interrupts Spotify (pausing the music we're
+            // showing lyrics for) and, when Spotify won't yield, setActive
+            // fails — leaving no active audio session, which makes custom PiP
+            // fail to start (PGPegasusErrorDomain -1003). Mixing lets our
+            // (near-silent) keep-alive audio coexist with Spotify's playback.
+            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            try session.setActive(true)
+            logger.log("[PiP] オーディオセッション有効化 (mixWithOthers)")
+        } catch {
+            logger.log("[PiP] オーディオセッション設定失敗: \(error.localizedDescription)")
+        }
     }
 
     private func playSilenceLoop() {
