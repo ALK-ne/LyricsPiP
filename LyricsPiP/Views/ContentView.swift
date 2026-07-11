@@ -79,20 +79,6 @@ struct ContentView: View {
             )
             .frame(maxHeight: .infinity)
 
-            // Must actually be part of the rendered view hierarchy for
-            // AVPictureInPictureController.isPictureInPicturePossible to ever
-            // become true — see PiPDisplayLayerView.swift. A prior 4x4/near-
-            // invisible size may itself have been the cause of the PIP window
-            // rendering solid black, so this is now a real, visible mini
-            // preview at a reasonable size (also useful as a UX bonus).
-            PiPHostView(controller: pipController)
-                .aspectRatio(16.0 / 9.0, contentMode: .fit)
-                .frame(width: 160)
-                .background(Color.black)
-                .overlay(alignment: .topLeading) {
-                    Text("PIPプレビュー").font(.caption2).foregroundStyle(.secondary).padding(2)
-                }
-
             Button(pipController.isPiPActive ? "PIPを閉じる" : "PIPで表示") {
                 if pipController.isPiPActive {
                     pipController.stop()
@@ -102,6 +88,18 @@ struct ContentView: View {
             }
             .buttonStyle(.borderedProminent)
             .disabled(syncEngine.lines.isEmpty || !pipController.isPiPPossible)
+            // The display layer must stay in the rendered view hierarchy for
+            // AVPictureInPictureController.isPictureInPicturePossible to become
+            // true, but the user doesn't want a visible preview. Keep it as a
+            // tiny, near-invisible layer tucked behind the (opaque) button — it
+            // takes no layout space and the PiP window's size comes from the
+            // rendered frame, not this host view.
+            .background(
+                PiPHostView(controller: pipController)
+                    .frame(width: 48, height: 16)
+                    .opacity(0.02)
+                    .allowsHitTesting(false)
+            )
 
             if let error = sessionClient.lastError {
                 Text(error)

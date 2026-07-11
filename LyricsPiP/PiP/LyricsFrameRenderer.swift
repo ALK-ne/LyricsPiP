@@ -5,7 +5,10 @@ import CoreMedia
 /// Renders the current + next lyric line into a pixel buffer suitable for
 /// enqueueing onto an `AVSampleBufferDisplayLayer` for custom-content PIP.
 enum LyricsFrameRenderer {
-    static let frameSize = CGSize(width: 640, height: 360)
+    // 3:1 (wide/short) so the PiP window follows this ratio, minimizing the
+    // vertical black margin around the two lyric lines. The PiP window shape is
+    // determined by this frame's aspect ratio.
+    static let frameSize = CGSize(width: 720, height: 240)
 
     static func renderImage(currentLine: String?, nextLine: String?) -> CGImage? {
         let renderer = UIGraphicsImageRenderer(size: frameSize)
@@ -16,14 +19,15 @@ enum LyricsFrameRenderer {
             let paragraph = NSMutableParagraphStyle()
             paragraph.alignment = .center
 
-            let currentRect = CGRect(x: 20, y: frameSize.height / 2 - 50, width: frameSize.width - 40, height: 60)
-            let nextRect = CGRect(x: 20, y: frameSize.height / 2 + 20, width: frameSize.width - 40, height: 40)
+            let w = frameSize.width - 48
+            let currentRect = CGRect(x: 24, y: 34, width: w, height: 96)
+            let nextRect = CGRect(x: 24, y: 140, width: w, height: 66)
 
             drawFittedLine(
                 currentLine ?? "♪",
                 in: currentRect,
-                maxFontSize: 32,
-                minFontSize: 14,
+                maxFontSize: 42,
+                minFontSize: 16,
                 weight: .bold,
                 color: .white,
                 paragraphStyle: paragraph
@@ -31,8 +35,8 @@ enum LyricsFrameRenderer {
             drawFittedLine(
                 nextLine ?? "",
                 in: nextRect,
-                maxFontSize: 22,
-                minFontSize: 12,
+                maxFontSize: 28,
+                minFontSize: 14,
                 weight: .regular,
                 color: UIColor(white: 1, alpha: 0.55),
                 paragraphStyle: paragraph
