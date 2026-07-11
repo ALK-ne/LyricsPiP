@@ -2,7 +2,7 @@ import Foundation
 import Combine
 import LyricsPiPCore
 
-/// Combines the currently-playing track/position from `PlaybackPoller` with
+/// Combines the currently-playing track/position from `PlaybackWatcher` with
 /// lyrics fetched from `LyricsService` to expose "which line is active right now".
 @MainActor
 final class LyricsSyncEngine: ObservableObject {
@@ -18,21 +18,21 @@ final class LyricsSyncEngine: ObservableObject {
     private var debugTimerTask: Task<Void, Never>?
 
     init(
-        poller: PlaybackPoller,
+        watcher: PlaybackWatcher,
         lyricsService: LyricsService? = nil,
         logger: (any LyricsPiPLogging)? = nil
     ) {
         self.lyricsService = lyricsService ?? LyricsService()
         self.logger = logger ?? DebugLog.shared
 
-        poller.$currentTrack
+        watcher.$currentTrack
             .removeDuplicates()
             .sink { [weak self] track in
                 self?.handleTrackChange(track)
             }
             .store(in: &cancellables)
 
-        poller.$estimatedPositionMs
+        watcher.$estimatedPositionMs
             .sink { [weak self] positionMs in
                 self?.updateActiveIndex(positionMs: positionMs)
             }

@@ -1,9 +1,10 @@
 import Foundation
 
-/// Estimates the current playback position between Spotify polls by
-/// extrapolating from the last polled position (the currently-playing
-/// endpoint has a standing ~30-35s rate limit, so polls are ~40s apart
-/// while the lyric display ticks every 0.2s — see PlaybackPoller).
+/// Estimates the current playback position between Spotify playback updates
+/// by extrapolating from the last known position. Updates arrive via the
+/// dealer WebSocket / connect-state path (track changes push instantly; a
+/// safety refresh runs every ~25s) while the lyric display ticks every 0.2s —
+/// see PlaybackWatcher.
 public struct PlaybackPositionInterpolator: Equatable, Sendable {
     public private(set) var basePositionMs: Int
     public private(set) var baseDate: Date

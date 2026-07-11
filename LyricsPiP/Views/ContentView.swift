@@ -2,17 +2,11 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var sessionClient: SpotifyWebSessionClient
-    @EnvironmentObject private var poller: PlaybackPoller
+    @EnvironmentObject private var watcher: PlaybackWatcher
     @EnvironmentObject private var syncEngine: LyricsSyncEngine
     @StateObject private var pipController = PiPLyricsController()
 
     @State private var showingLogin = false
-
-    private static let timeFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.timeStyle = .medium
-        return formatter
-    }()
 
     /// CFBundleVersion is set to the GitHub Actions run number at build time
     /// (see .github/workflows/ios-build.yml), so this identifies exactly
@@ -75,14 +69,6 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .trailing)
 
-            if let until = poller.rateLimitedUntil, until > Date() {
-                Text("Spotifyのレート制限中です。\(Self.timeFormatter.string(from: until))頃まで自動では再試行しません。アプリを閉じずにお待ちください。")
-                    .font(.footnote)
-                    .foregroundStyle(.orange)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
-            }
-
             trackHeader
 
             Button("テスト用ダミー歌詞を読み込む(PIP確認用)") {
@@ -91,7 +77,7 @@ struct ContentView: View {
             .font(.footnote)
 
             LyricsPreviewView(
-                hasTrack: poller.currentTrack != nil || !syncEngine.lines.isEmpty,
+                hasTrack: watcher.currentTrack != nil || !syncEngine.lines.isEmpty,
                 lines: syncEngine.lines,
                 activeIndex: syncEngine.activeIndex,
                 noLyricsFound: syncEngine.noLyricsFound
@@ -136,7 +122,7 @@ struct ContentView: View {
 
     @ViewBuilder
     private var trackHeader: some View {
-        if let track = poller.currentTrack {
+        if let track = watcher.currentTrack {
             VStack(spacing: 4) {
                 Text(track.name).font(.headline)
                 Text(track.artist).font(.subheadline).foregroundStyle(.secondary)
@@ -151,6 +137,6 @@ struct ContentView: View {
 #Preview {
     ContentView()
         .environmentObject(SpotifyWebSessionClient())
-        .environmentObject(PlaybackPoller(sessionClient: SpotifyWebSessionClient()))
-        .environmentObject(LyricsSyncEngine(poller: PlaybackPoller(sessionClient: SpotifyWebSessionClient())))
+        .environmentObject(PlaybackWatcher(sessionClient: SpotifyWebSessionClient()))
+        .environmentObject(LyricsSyncEngine(watcher: PlaybackWatcher(sessionClient: SpotifyWebSessionClient())))
 }
