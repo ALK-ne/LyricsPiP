@@ -213,11 +213,18 @@ final class PlaybackWatcher: ObservableObject {
         isPaused = snapshot.isPaused
         isPlaying = !snapshot.isPaused
 
-        if snapshot.track != currentTrack {
-            if let t = snapshot.track {
+        // Guard against transient partial cluster updates dropping artist/title
+        // for the track that's already playing (see TrackMetadataMerge).
+        let resolved = TrackMetadataMerge.resolve(existing: currentTrack, incoming: snapshot.track)
+        if resolved?.id != currentTrack?.id {
+            if let t = resolved {
                 logger.log("[Watch] 曲検知: \(t.name) / \(t.artist)")
             }
-            currentTrack = snapshot.track
+            currentTrack = resolved
+        } else if resolved != currentTrack {
+            // Same track, richer metadata (e.g. artist filled back in) — update
+            // quietly without re-logging a "song detected" line.
+            currentTrack = resolved
         }
 
         // position_as_of_timestamp was measured at snapshot.timestampMs (Spotify

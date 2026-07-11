@@ -68,4 +68,34 @@ final class SpotifyClusterTests: XCTestCase {
         XCTAssertEqual(snapshot.positionMs, 3)
         XCTAssertTrue(snapshot.isPaused)
     }
+
+    // MARK: - TrackMetadataMerge
+
+    private func track(_ id: String, name: String = "N", artist: String = "A") -> CurrentTrack {
+        CurrentTrack(id: id, name: name, artist: artist, album: "Al", durationMs: 1000)
+    }
+
+    func testMergeKeepsExistingWhenSameTrackLosesArtist() {
+        let existing = track("x", artist: "Mrs. GREEN APPLE")
+        let blip = track("x", artist: "")
+        XCTAssertEqual(TrackMetadataMerge.resolve(existing: existing, incoming: blip), existing)
+    }
+
+    func testMergeAcceptsRicherUpdateThatFillsArtistBackIn() {
+        let existing = track("x", artist: "")
+        let filled = track("x", artist: "Chevon")
+        XCTAssertEqual(TrackMetadataMerge.resolve(existing: existing, incoming: filled), filled)
+    }
+
+    func testMergeAcceptsGenuinelyDifferentTrackEvenWithEmptyArtist() {
+        let existing = track("x", artist: "Someone")
+        let newTrack = track("y", artist: "")
+        XCTAssertEqual(TrackMetadataMerge.resolve(existing: existing, incoming: newTrack), newTrack)
+    }
+
+    func testMergePassesThroughNilAndFirstTrack() {
+        XCTAssertNil(TrackMetadataMerge.resolve(existing: track("x"), incoming: nil))
+        let first = track("x")
+        XCTAssertEqual(TrackMetadataMerge.resolve(existing: nil, incoming: first), first)
+    }
 }

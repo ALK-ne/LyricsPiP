@@ -26,6 +26,25 @@ public struct PlaybackSnapshot: Equatable, Sendable {
     }
 }
 
+public enum TrackMetadataMerge {
+    /// Chooses which track to keep when a new snapshot arrives.
+    ///
+    /// connect-state occasionally emits a *partial* cluster update for the
+    /// track that's already playing, momentarily dropping `artist_name` (and
+    /// in principle `title`) to empty. Without guarding, that blip would
+    /// overwrite good metadata and flicker the UI. This keeps the existing
+    /// track when the incoming one is the *same* track with emptier fields,
+    /// and otherwise accepts the incoming track (new song, or a richer update
+    /// that fills a field back in).
+    public static func resolve(existing: CurrentTrack?, incoming: CurrentTrack?) -> CurrentTrack? {
+        guard let incoming else { return nil }
+        guard let existing, existing.id == incoming.id else { return incoming }
+        if incoming.artist.isEmpty && !existing.artist.isEmpty { return existing }
+        if incoming.name.isEmpty && !existing.name.isEmpty { return existing }
+        return incoming
+    }
+}
+
 public enum SpotifyClusterParser {
     /// Parses a connect-state cluster JSON body into a playback snapshot.
     /// Returns `nil` when there is no `player_state` at all (nothing loaded).

@@ -71,13 +71,8 @@ struct ContentView: View {
 
             trackHeader
 
-            Button("テスト用ダミー歌詞を読み込む(PIP確認用)") {
-                syncEngine.loadDebugLyrics()
-            }
-            .font(.footnote)
-
             LyricsPreviewView(
-                hasTrack: watcher.currentTrack != nil || !syncEngine.lines.isEmpty,
+                hasTrack: watcher.currentTrack != nil,
                 lines: syncEngine.lines,
                 activeIndex: syncEngine.activeIndex,
                 noLyricsFound: syncEngine.noLyricsFound
