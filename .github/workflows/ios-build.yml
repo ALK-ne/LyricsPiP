@@ -78,8 +78,10 @@ jobs:
       - name: Publish .ipa to rolling "latest" release
         # Artifacts require a GitHub login to download, which is awkward from
         # the iPhone. A rolling prerelease gives a stable public URL that
-        # Safari on the device can fetch directly and hand to SideStore:
-        # https://github.com/ALK-ne/LyricsPiP/releases/latest/download/LyricsPiP-unsigned.ipa
+        # Safari on the device can fetch directly and hand to SideStore.
+        # NOTE: must be the tag-specific URL — the /releases/latest/ alias
+        # skips prereleases and 404s:
+        # https://github.com/ALK-ne/LyricsPiP/releases/download/latest/LyricsPiP-unsigned.ipa
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
