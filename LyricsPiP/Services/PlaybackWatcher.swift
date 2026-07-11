@@ -39,6 +39,21 @@ final class PlaybackWatcher: ObservableObject {
     private var interpolator = PlaybackPositionInterpolator()
     private var isPaused = true
 
+    // `URLSession.shared`'s default `timeoutIntervalForRequest` is 60s, and
+    // URLSessionWebSocketTask is widely reported to hit this even with active
+    // traffic (the reset-on-frame-received behavior isn't reliable for
+    // WebSocket frames on iOS) — this is the suspected cause of the
+    // "Software caused connection abort" reconnects observed roughly every
+    // 60-90s. A dedicated session with a much longer timeout reduces how often
+    // that fires; it isn't a guaranteed root fix since the underlying reset
+    // may still be unreliable, just a longer runway between forced disconnects.
+    private static let webSocketSession: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 300
+        config.timeoutIntervalForResource = 3600
+        return URLSession(configuration: config)
+    }()
+
     private let tickInterval: TimeInterval = 0.2
     private let safetyRefreshInterval: TimeInterval = 25.0
     private let pingInterval: TimeInterval = 30.0
@@ -98,7 +113,7 @@ final class PlaybackWatcher: ObservableObject {
             await resolveSpclientHost(token: token)
 
             guard let url = URL(string: "wss://dealer.spotify.com/?access_token=\(token)") else { return }
-            let ws = URLSession.shared.webSocketTask(with: url)
+            let ws = Self.webSocketSession.webSocketTask(with: url)
             webSocket = ws
             connectionId = nil
             ws.resume()
