@@ -36,6 +36,11 @@ final class PiPLyricsController: NSObject, ObservableObject {
     // active lyric line yet (currentText nil == the initial nil), which left
     // the layer empty if the user opened PiP before a line became active.
     private var hasEnqueuedFrame = false
+    // Guards the one-time log line in prepareForAutoStart(); the underlying
+    // steps it calls are all individually idempotent/self-guarded, so the
+    // method itself is safe to call repeatedly (needed since it may run
+    // before the display layer/pipController exist yet and has to retry).
+    private var autoStartArmed = false
 
     init(logger: (any LyricsPiPLogging)? = nil) {
         self.logger = logger ?? DebugLog.shared
@@ -46,11 +51,37 @@ final class PiPLyricsController: NSObject, ObservableObject {
         syncEngine.$activeIndex
             .combineLatest(syncEngine.$lines)
             .sink { [weak self] activeIndex, lines in
-                self?.latestActiveIndex = activeIndex
-                self?.latestLines = lines
-                self?.updateFrame(activeIndex: activeIndex, lines: lines)
+                guard let self else { return }
+                self.latestActiveIndex = activeIndex
+                self.latestLines = lines
+                self.updateFrame(activeIndex: activeIndex, lines: lines)
+                // Once real lyrics exist, proactively get audio/PiP ready so
+                // canStartPictureInPictureAutomaticallyFromInline can actually
+                // fire the moment the user backgrounds the app -- doing this
+                // lazily on backgrounding itself would be too late.
+                if !lines.isEmpty {
+                    self.prepareForAutoStart()
+                }
             }
             .store(in: &cancellables)
+    }
+
+    /// Arms automatic PiP-on-background: activates the (mixed) audio session,
+    /// ensures the PiP controller exists with content already flowing, and
+    /// opts in to `canStartPictureInPictureAutomaticallyFromInline` so iOS
+    /// starts PiP itself when the app backgrounds -- no button tap required.
+    /// The manual "PIPで表示" button is kept as a fallback while this is
+    /// unverified on device; both paths share this same setup.
+    private func prepareForAutoStart() {
+        configureAudioSession()
+        setUpPiPControllerIfNeeded()
+        playSilenceLoop()
+        updateFrame(activeIndex: latestActiveIndex, lines: latestLines)
+
+        guard let pipController, !autoStartArmed else { return }
+        pipController.canStartPictureInPictureAutomaticallyFromInline = true
+        autoStartArmed = true
+        logger.log("[PiP] 自動開始を有効化 (バックグラウンド移行時に自動でPiP開始)")
     }
 
     /// Called by `PiPHostView` once its backing layer exists. That layer must
@@ -143,6 +174,10 @@ final class PiPLyricsController: NSObject, ObservableObject {
     }
 
     private func playSilenceLoop() {
+        // Checks isPlaying (not just nil) so this correctly resumes after the
+        // manual "PIPを閉じる" button stops it — called repeatedly from
+        // prepareForAutoStart, which must be able to re-arm after a manual stop.
+        guard silencePlayer?.isPlaying != true else { return }
         guard let url = Bundle.main.url(forResource: "silence", withExtension: "m4a") else { return }
         silencePlayer = try? AVAudioPlayer(contentsOf: url)
         silencePlayer?.numberOfLoops = -1
@@ -206,7 +241,8 @@ final class PiPLyricsController: NSObject, ObservableObject {
         }
         displayLayer.enqueue(sampleBuffer)
         hasEnqueuedFrame = true
-        logger.log("[PiP] フレーム表示: \"\(currentText ?? "")\"")
+        // Deliberately not logged: fires on every lyric line change (every
+        // few seconds while a track plays) and quickly floods the log.
     }
 }
 
