@@ -73,12 +73,20 @@ final class PiPLyricsController: NSObject, ObservableObject {
     /// The manual "PIPで表示" button is kept as a fallback while this is
     /// unverified on device; both paths share this same setup.
     private func prepareForAutoStart() {
+        // Once armed, this is a no-op — otherwise configureAudioSession's log
+        // line (and the redundant setup work) would fire on every ~0.2s
+        // position tick for as long as lyrics keep updating, flooding the log
+        // exactly like the removed per-frame line did. Before arming, retrying
+        // each tick is intentional: the display layer/pipController may not
+        // exist yet the first few times this runs.
+        guard !autoStartArmed else { return }
+
         configureAudioSession()
         setUpPiPControllerIfNeeded()
         playSilenceLoop()
         updateFrame(activeIndex: latestActiveIndex, lines: latestLines)
 
-        guard let pipController, !autoStartArmed else { return }
+        guard let pipController else { return }
         pipController.canStartPictureInPictureAutomaticallyFromInline = true
         autoStartArmed = true
         logger.log("[PiP] 自動開始を有効化 (バックグラウンド移行時に自動でPiP開始)")
