@@ -150,10 +150,23 @@ AltStoreでのインストールが成功した(=このPC/ネットワーク/App
 - **実機での確認**: Safari共有メニュー→SideStoreの経路は「The file doesn't exist」エラーになったが、SideStoreの「My Apps」→「+」→ファイルブラウザ経由なら成功。LyricsPiPのインストールと、SideStore単体でのリフレッシュ(PC不要)の両方を確認。
 - これでIssue #1の項目3も完了。開発ループは「push → CI → iPhoneのSafariでダウンロード → SideStoreでインストール」となり、PCでのダウンロード・転送工程が消えた。7日ごとのリフレッシュもiPhone単体で回せる。
 
+### 16. 曲検知をREST ポーリングから dealer WebSocket / connect-state へ全面刷新(最重要)
+
+24時間ブロック解除後に本番パイプラインを試したが、`currently-playing`が依然として429。ローカル(`spotify-auth-repro.mjs`)で徹底検証した結果、根本原因が判明した。
+
+- **診断**: `sp_dc`由来のweb-playerトークン(clientId `d8a5ed95...`)は、2025年12月のSpotify変更で`api.spotify.com`の**全エンドポイントが実質ブロック**されていた。検証で`profile`・`search`・`devices`まで全部429、`/me/player`に至っては1回叩くだけで24時間ブロックが再発動することを確認(切り分け中に実際に再発させてしまった)。`Retry-After`が28→59→1→58と無意味に乱高下するのも、通常のレート制限ではなくこのトークン種別を締め出すための挙動と考えると符合する。別アカウント・別IP(モバイル回線)でも429で、このプロジェクトを通じて**一度も200が返ったことがなかった**ことから、この経路は完全に死んでいると結論。
+- **突破口**: Spotify Web Player本体(open.spotify.com)は今も動く。その内部機構である**dealer WebSocket + connect-state**(`wss://dealer.spotify.com` + `spclient.spotify.com`)は同じ`sp_dc`認証で生きており、`api.spotify.com`とは別ホスト。Nodeスパイクで実証し、歌詞同期に必要な情報(曲名・アーティスト・アルバム・長さ・再生位置・基準タイムスタンプ・一時停止状態)が**すべて取得できる**ことを実データで確認(Mrs. GREEN APPLE「藍(あお)」で検証)。
+- **実装**: 
+  - `PlaybackWatcher`(新規、`PlaybackPoller`を置換): dealer WebSocketに接続 → `Spotify-Connection-Id`取得 → connect-stateへPUTして購読 → 返ってきたclusterをパース。pushメッセージは「変化があった」トリガーとして使い(gzip圧縮されうるpushペイロードを解析せず)clean stateを再取得、pause/seek/取りこぼしは25秒のセーフティ更新で拾う。**push型なので曲変更は即座に反映**され、レート制限の対象にもならない。`@Published`インターフェース(`currentTrack`/`isPlaying`/`estimatedPositionMs`)は据え置きで、`LyricsSyncEngine`・PIP・UIはリネーム以外変更なし。
+  - `LyricsPiPCore`: `SpotifyClusterParser`+`PlaybackSnapshot`(純粋・実キャプチャしたclusterでテスト)。死んだ`SpotifyCurrentlyPlaying`モデルとテストを削除、`SpotifyAccessToken`は継続使用。
+  - レート制限警告バナー・`blockedUntil`永続化を撤去(不要になった)。
+- **メリット**: Premium不要・追加コストなし・マイク不要という当初条件を全て満たしたまま問題を根本解決。しかも旧方式(40秒間隔ポーリング、最大40秒の曲切替遅延)より即応性が高い。
+- 検証: CI一発グリーン(Coreテスト30件パス=新規SpotifyClusterTests 4件含む、iOSビルド成功)。実機E2Eは次のタスク。
+
 ### 現状・残タスク
 
 - Issue #1の対応項目(1・2a・2b・3・4・5)は実装済み、README/CHANGELOGにも反映済み。
 - ダミー歌詞を使ったPIP表示の主要な不具合(黒画面・長い行の途切れ)は解消済み。バックグラウンド維持も実機で確認済み。
-- レート制限はアカウント単位ではないため別アカウントでの回避は不可。素直に待つ方針。
+- **曲検知はdealer WebSocket/connect-state方式に刷新済み**(旧`api.spotify.com`ポーリングは2025年12月のSpotify変更で死亡)。Nodeで実証済み、実機E2Eは未確認。
 - リポジトリはパブリックに切り替え済み。GitHub課金($8.74)の免除依頼は返答待ち。
-- 残タスク: 実際のSpotify再生を使った本番パイプライン(ログイン→曲検知→歌詞取得→PIP表示)の通し確認。レート制限が解除され次第、実施する。
+- 残タスク: 実機での本番パイプライン通し確認(ログイン→WebSocketで曲検知→lrclib歌詞取得→PIP同期表示)。build 51以降で実施可能。
