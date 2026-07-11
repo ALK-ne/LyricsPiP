@@ -2,6 +2,7 @@ import AVKit
 import AVFoundation
 import Combine
 import CoreMedia
+import UIKit
 import LyricsPiPCore
 
 /// Owns the custom-content `AVPictureInPictureController` that floats the
@@ -41,10 +42,34 @@ final class PiPLyricsController: NSObject, ObservableObject {
     // method itself is safe to call repeatedly (needed since it may run
     // before the display layer/pipController exist yet and has to retry).
     private var autoStartArmed = false
+    // Intentionally never removed: this controller is owned as a @StateObject
+    // for the app's entire lifetime (like `cancellables` below), so there's no
+    // meaningful deinit to unregister from — and unregistering from a
+    // MainActor-isolated deinit is its own concurrency-correctness headache.
+    private var foregroundObserver: NSObjectProtocol?
 
     init(logger: (any LyricsPiPLogging)? = nil) {
         self.logger = logger ?? DebugLog.shared
         super.init()
+
+        // canStartPictureInPictureAutomaticallyFromInline's documented
+        // "stops automatically on foreground" behavior turned out, on device,
+        // to only fire when the user taps PiP's own "return to app" button —
+        // reopening the app directly (home screen icon / app switcher) never
+        // calls stopPictureInPicture at all for this custom sample-buffer
+        // content source, leaving PiP stuck open. Detecting foreground
+        // ourselves and stopping explicitly covers that path too.
+        foregroundObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.isPiPActive else { return }
+                self.logger.log("[PiP] フォアグラウンド復帰を検知、PiPを閉じます")
+                self.pipController?.stopPictureInPicture()
+            }
+        }
     }
 
     func attach(syncEngine: LyricsSyncEngine) {
