@@ -269,6 +269,20 @@ extension PiPLyricsController: AVPictureInPictureControllerDelegate {
         }
     }
 
+    /// The system calls this when PiP is stopping (manual or automatic-on-
+    /// foreground via canStartPictureInPictureAutomaticallyFromInline) and
+    /// waits for the completion handler before finishing the transition. We
+    /// have no inline player view to restore, so there's nothing to do except
+    /// call it back immediately — without this method at all, the automatic
+    /// stop-on-foreground appears to never actually complete, leaving PiP
+    /// stuck open until the user manually taps "PIPを閉じる".
+    nonisolated func pictureInPictureController(
+        _ pictureInPictureController: AVPictureInPictureController,
+        restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void
+    ) {
+        completionHandler(true)
+    }
+
     nonisolated func pictureInPictureController(
         _ pictureInPictureController: AVPictureInPictureController,
         failedToStartPictureInPictureWithError error: Error
