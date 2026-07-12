@@ -19,3 +19,6 @@ xcuserdata/
 
 # Third-party precompiled tool (downloaded, not vendored) — see README
 tools/libimobiledevice-win/
+
+# Local-only working notes (contains machine-specific details; never publish)
+CLAUDE.md
