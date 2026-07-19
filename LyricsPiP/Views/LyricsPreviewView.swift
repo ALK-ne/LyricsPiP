@@ -9,14 +9,17 @@ struct LyricsPreviewView: View {
 
     var body: some View {
         if !hasTrack {
-            EmptyView()
+            ContentUnavailableView("再生を待っています", systemImage: "music.note")
         } else if noLyricsFound {
-            Text("同期歌詞が見つかりませんでした")
-                .foregroundStyle(.secondary)
-                .padding()
+            ContentUnavailableView("同期歌詞が見つかりませんでした", systemImage: "text.badge.xmark")
         } else if lines.isEmpty {
-            ProgressView("歌詞を取得中…")
-                .padding()
+            VStack(spacing: 12) {
+                ProgressView()
+                Text("歌詞を取得中…")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollViewReader { proxy in
                 ScrollView {
@@ -25,6 +28,7 @@ struct LyricsPreviewView: View {
                             Text(line.text.isEmpty ? "♪" : line.text)
                                 .font(index == activeIndex ? .title3.bold() : .body)
                                 .foregroundStyle(index == activeIndex ? .primary : .secondary)
+                                .animation(.easeInOut(duration: 0.2), value: activeIndex)
                                 .id(index)
                         }
                     }

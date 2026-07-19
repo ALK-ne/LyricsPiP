@@ -58,16 +58,27 @@ struct ContentView: View {
 
     private var portraitBody: some View {
         NavigationStack {
-            VStack(spacing: 16) {
+            Group {
                 if !sessionClient.isLoggedIn {
                     loggedOutView
                 } else {
                     loggedInView
                 }
             }
-            .padding()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(.systemGroupedBackground).ignoresSafeArea())
             .navigationTitle("LyricsPiP")
             .toolbar {
+                if sessionClient.isLoggedIn {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            OrientationManager.shared.enterLandscape()
+                        } label: {
+                            Image(systemName: "rectangle.landscape.rotate")
+                        }
+                        .accessibilityLabel("横画面で歌詞表示")
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         showingSettings = true
@@ -89,42 +100,40 @@ struct ContentView: View {
     }
 
     private var loggedOutView: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 20) {
             Spacer()
-            Text("Spotifyにログインすると、再生中の曲を検知できます")
-                .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
-            Button("Spotifyにログイン") { showingLogin = true }
-                .buttonStyle(.borderedProminent)
+            Image(systemName: "music.note.list")
+                .font(.system(size: 56))
+                .foregroundStyle(.tint)
+            VStack(spacing: 8) {
+                Text("LyricsPiP")
+                    .font(.title2.weight(.bold))
+                Text("Spotifyにログインすると、再生中の曲を検知して歌詞を表示します")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            Button {
+                showingLogin = true
+            } label: {
+                Text("Spotifyにログイン")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
             if let error = sessionClient.lastError {
                 Text(error)
                     .font(.footnote)
                     .foregroundStyle(.red)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal)
             }
             Spacer()
         }
+        .padding(24)
     }
 
     private var loggedInView: some View {
         VStack(spacing: 16) {
-            HStack {
-                Button {
-                    OrientationManager.shared.enterLandscape()
-                } label: {
-                    Image(systemName: "rectangle.landscape.rotate")
-                        .font(.title3)
-                }
-                .accessibilityLabel("横画面で歌詞表示")
-
-                Spacer()
-
-                Text(Self.versionString)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-
             trackHeader
 
             LyricsPreviewView(
@@ -133,7 +142,8 @@ struct ContentView: View {
                 activeIndex: syncEngine.activeIndex,
                 noLyricsFound: syncEngine.noLyricsFound
             )
-            .frame(maxHeight: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
 
             if let error = sessionClient.lastError {
                 Text(error)
@@ -141,22 +151,42 @@ struct ContentView: View {
                     .foregroundStyle(.red)
             }
 
-            Button("ログアウト") { sessionClient.logout() }
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+            footer
         }
+        .padding()
     }
 
     @ViewBuilder
     private var trackHeader: some View {
-        if let track = watcher.currentTrack {
-            VStack(spacing: 4) {
-                Text(track.name).font(.headline)
-                Text(track.artist).font(.subheadline).foregroundStyle(.secondary)
+        Group {
+            if let track = watcher.currentTrack {
+                VStack(spacing: 4) {
+                    Text(track.name)
+                        .font(.title3.weight(.semibold))
+                        .multilineTextAlignment(.center)
+                    Text(track.artist)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Label("再生中の曲が見つかりません", systemImage: "music.note")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
-        } else {
-            Text("再生中の曲が見つかりません")
-                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding()
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private var footer: some View {
+        HStack {
+            Text(Self.versionString)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+            Spacer()
+            Button("ログアウト", role: .destructive) { sessionClient.logout() }
+                .font(.footnote)
         }
     }
 }
