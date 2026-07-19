@@ -81,7 +81,13 @@ struct LandscapeLyricsView: View {
                         .multilineTextAlignment(.center)
                         .lineLimit(2)
                         .minimumScaleFactor(0.3)
+                        // Each fixed slot keeps its identity (id: offset) while
+                        // its text changes as the window advances; contentTransition
+                        // cross-fades that text change, and the animation(value:)
+                        // drives it only when the active line actually changes.
+                        .contentTransition(.opacity)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .animation(.easeInOut(duration: 0.2), value: activeIndex)
                 }
             }
         }
