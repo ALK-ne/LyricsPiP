@@ -8,14 +8,12 @@ struct ContentView: View {
 
     @State private var showingLogin = false
 
-    /// CFBundleVersion is set to the GitHub Actions run number at build time
-    /// (see .github/workflows/ios-build.yml), so this identifies exactly
-    /// which CI build is currently installed.
+    /// Marketing version only (CFBundleShortVersionString), e.g. "v1.0".
+    /// The CI build number (CFBundleVersion) is intentionally not shown.
     private static var versionString: String {
         let info = Bundle.main.infoDictionary
         let shortVersion = info?["CFBundleShortVersionString"] as? String ?? "?"
-        let build = info?["CFBundleVersion"] as? String ?? "?"
-        return "v\(shortVersion) (build \(build))"
+        return "v\(shortVersion)"
     }
 
     var body: some View {
