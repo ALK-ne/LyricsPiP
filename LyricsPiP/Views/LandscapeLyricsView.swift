@@ -3,8 +3,14 @@ import LyricsPiPCore
 
 /// Full-screen lyrics shown while the app itself is in landscape. This is a
 /// normal in-app view (not PiP), so it fills the whole screen with no OS size
-/// or position constraints — the large counterpart to the small PiP window.
-/// It mirrors the PiP content and honors the same display settings.
+/// or position constraints.
+///
+/// Unlike PiP (which shows a small fixed window of lines), landscape shows the
+/// whole lyric sheet as a scrolling list that keeps the current line centered
+/// and flows upward as the song progresses. The ②③ settings (next-line count /
+/// show-previous) are reproduced here via *font size*: the target number of
+/// visible lines sets how large the text is — fewer lines = bigger/immersive,
+/// more lines = smaller/more context. (PiP still applies ②③ literally.)
 struct LandscapeLyricsView: View {
     let hasTrack: Bool
     let trackName: String?
@@ -14,6 +20,9 @@ struct LandscapeLyricsView: View {
     let noLyricsFound: Bool
     @ObservedObject var settings: LyricsDisplaySettings
 
+    private let minFontSize: CGFloat = 22
+    private let maxFontSize: CGFloat = 80
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
@@ -22,7 +31,7 @@ struct LandscapeLyricsView: View {
                     header
                 }
                 content
-                    .frame(maxHeight: .infinity)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .padding(.horizontal, 28)
             .padding(.vertical, 20)
@@ -65,41 +74,66 @@ struct LandscapeLyricsView: View {
             placeholder("再生中の曲が見つかりません")
         } else if noLyricsFound {
             placeholder("歌詞が見つかりません")
+        } else if lines.isEmpty {
+            ProgressView()
+                .tint(.white)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            let display = LyricsLineWindow.build(
-                activeIndex: activeIndex,
-                lines: lines,
-                showPreviousLine: settings.showPreviousLine,
-                nextLinesCount: settings.nextLinesCount
-            )
-            VStack(spacing: 8) {
-                ForEach(Array(display.enumerated()), id: \.offset) { _, line in
-                    Text(displayText(for: line))
-                        .font(.system(size: line.isCurrent ? 60 : 38,
-                                      weight: line.isCurrent ? .bold : .regular))
-                        .foregroundStyle(line.isCurrent ? Color.white : Color.white.opacity(0.5))
-                        .multilineTextAlignment(.center)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.3)
-                        // Each fixed slot keeps its identity (id: offset) while
-                        // its text changes as the window advances; contentTransition
-                        // cross-fades that text change, and the animation(value:)
-                        // drives it only when the active line actually changes.
-                        .contentTransition(.opacity)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .animation(.easeInOut(duration: 0.2), value: activeIndex)
+            scrollingLyrics
+        }
+    }
+
+    /// The whole lyric sheet as a vertical scroll list, current line centered,
+    /// flowing upward as the song advances. Font size is derived from ②③.
+    private var scrollingLyrics: some View {
+        GeometryReader { geo in
+            let base = fontSize(forHeight: geo.size.height)
+            ScrollViewReader { proxy in
+                ScrollView(.vertical, showsIndicators: false) {
+                    LazyVStack(spacing: base * 0.5) {
+                        ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
+                            Text(line.text.isEmpty ? "♪" : line.text)
+                                .font(.system(size: index == activeIndex ? base * 1.12 : base,
+                                              weight: index == activeIndex ? .bold : .regular))
+                                .foregroundStyle(index == activeIndex ? Color.white : Color.white.opacity(0.45))
+                                .multilineTextAlignment(.center)
+                                .minimumScaleFactor(0.4)
+                                .frame(maxWidth: .infinity)
+                                .animation(.easeInOut(duration: 0.25), value: activeIndex)
+                                .id(index)
+                        }
+                    }
+                    // Top/bottom room so the first and last lines can also
+                    // reach the vertical center.
+                    .padding(.vertical, geo.size.height * 0.45)
+                }
+                .onChange(of: activeIndex) { _, newValue in
+                    guard let newValue else { return }
+                    withAnimation(.easeInOut(duration: 0.35)) {
+                        proxy.scrollTo(newValue, anchor: .center)
+                    }
+                }
+                .onChange(of: base) { _, _ in
+                    // Font size (hence layout) changed via settings/rotation;
+                    // re-center the current line without animation.
+                    guard let activeIndex else { return }
+                    proxy.scrollTo(activeIndex, anchor: .center)
+                }
+                .onAppear {
+                    guard let activeIndex else { return }
+                    proxy.scrollTo(activeIndex, anchor: .center)
                 }
             }
         }
     }
 
-    private func displayText(for line: DisplayLyricLine) -> String {
-        if line.text.isEmpty {
-            // Keep an empty (non-current) slot occupying space so the current
-            // line stays vertically centered when there's no previous/next line.
-            return line.isCurrent ? "♪" : " "
-        }
-        return line.text
+    /// Maps ②③ to a font size: target visible lines = (prev? 1 : 0) + current +
+    /// nextLinesCount, then size the text so roughly that many lines fill the
+    /// height. Clamped so it never gets unreadably small or absurdly large.
+    private func fontSize(forHeight height: CGFloat) -> CGFloat {
+        let targetLines = (settings.showPreviousLine ? 1 : 0) + 1 + settings.nextLinesCount
+        let raw = (height / CGFloat(max(1, targetLines))) * 0.58
+        return min(maxFontSize, max(minFontSize, raw))
     }
 
     private func placeholder(_ text: String) -> some View {
@@ -107,5 +141,6 @@ struct LandscapeLyricsView: View {
             .font(.title)
             .foregroundStyle(.secondary)
             .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
