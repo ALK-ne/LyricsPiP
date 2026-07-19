@@ -6,11 +6,14 @@ import LyricsPiPCore
 /// or position constraints.
 ///
 /// Unlike PiP (which shows a small fixed window of lines), landscape shows the
-/// whole lyric sheet as a scrolling list that keeps the current line centered
-/// and flows upward as the song progresses. The ②③ settings (next-line count /
-/// show-previous) are reproduced here via *font size*: the target number of
-/// visible lines sets how large the text is — fewer lines = bigger/immersive,
-/// more lines = smaller/more context. (PiP still applies ②③ literally.)
+/// whole lyric sheet as a scrolling list that flows upward as the song
+/// progresses. The ②③ settings are reproduced here as:
+/// - ② (next-line count) → font size + line spacing: ②=1 is largest with the
+///   fewest lines on screen, ②=5 is smallest with the most.
+/// - ③ (show previous) → scroll anchor: on = current line centered (previous
+///   line visible above); off = current line near the top (previous scrolled
+///   off, focus on upcoming lines).
+/// (PiP still applies ②③ literally as a fixed window.)
 struct LandscapeLyricsView: View {
     let hasTrack: Bool
     let trackName: String?
@@ -91,9 +94,12 @@ struct LandscapeLyricsView: View {
     private var scrollingLyrics: some View {
         GeometryReader { geo in
             let base = fontSize(forHeight: geo.size.height)
+            // Wider line gaps at ②=1 (fewer lines on screen), tight at ②=5
+            // (more lines) — strengthens ②'s visible effect beyond font size.
+            let spacing = base * (0.9 - 0.5 * sizeT)
             ScrollViewReader { proxy in
                 ScrollView(.vertical, showsIndicators: false) {
-                    LazyVStack(spacing: base * 0.5) {
+                    LazyVStack(spacing: spacing) {
                         ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
                             Text(line.text.isEmpty ? "♪" : line.text)
                                 .font(.system(size: index == activeIndex ? base * 1.12 : base,
@@ -116,30 +122,51 @@ struct LandscapeLyricsView: View {
                 .onChange(of: activeIndex) { _, newValue in
                     guard let newValue else { return }
                     withAnimation(.easeInOut(duration: 0.35)) {
-                        proxy.scrollTo(newValue, anchor: .center)
+                        proxy.scrollTo(newValue, anchor: scrollAnchor)
                     }
                 }
                 .onChange(of: base) { _, _ in
-                    // Font size (hence layout) changed via settings/rotation;
-                    // re-center the current line without animation.
+                    // Font size (hence layout) changed via ② / rotation.
                     guard let activeIndex else { return }
-                    proxy.scrollTo(activeIndex, anchor: .center)
+                    proxy.scrollTo(activeIndex, anchor: scrollAnchor)
+                }
+                .onChange(of: settings.showPreviousLine) { _, _ in
+                    // ③ toggles the anchor (center vs top): re-place current line.
+                    guard let activeIndex else { return }
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        proxy.scrollTo(activeIndex, anchor: scrollAnchor)
+                    }
                 }
                 .onAppear {
                     guard let activeIndex else { return }
-                    proxy.scrollTo(activeIndex, anchor: .center)
+                    proxy.scrollTo(activeIndex, anchor: scrollAnchor)
                 }
             }
         }
     }
 
-    /// Maps ②③ to a font size: target visible lines = (prev? 1 : 0) + current +
-    /// nextLinesCount, then size the text so roughly that many lines fill the
-    /// height. Clamped so it never gets unreadably small or absurdly large.
+    /// ② → font size, spread linearly (largest at ②=1, smallest at ②=5) so every
+    /// step visibly changes size, instead of clamping flat at the top as the old
+    /// height/lines formula did. Kept below the width-overflow point so single
+    /// lines shrink to one row rather than wrapping.
     private func fontSize(forHeight height: CGFloat) -> CGFloat {
-        let targetLines = (settings.showPreviousLine ? 1 : 0) + 1 + settings.nextLinesCount
-        let raw = (height / CGFloat(max(1, targetLines))) * 0.58
-        return min(maxFontSize, max(minFontSize, raw))
+        let big = min(maxFontSize, height * 0.15)
+        let small = max(minFontSize, height * 0.072)
+        return big - (big - small) * sizeT
+    }
+
+    /// 0 at ②=1 (biggest / fewest lines) … 1 at ②=5 (smallest / most lines).
+    private var sizeT: CGFloat {
+        let span = CGFloat(max(1, LyricsDisplaySettings.maxNextLines - LyricsDisplaySettings.minNextLines))
+        return CGFloat(settings.nextLinesCount - LyricsDisplaySettings.minNextLines) / span
+    }
+
+    /// ③ → where the current line sits. On: centered, so the previous line shows
+    /// above it. Off: near the top, so the previous line scrolls off and the
+    /// focus is on the upcoming lines — this is how "show previous line" stays
+    /// meaningful in a full scroll list.
+    private var scrollAnchor: UnitPoint {
+        settings.showPreviousLine ? .center : UnitPoint(x: 0.5, y: 0.16)
     }
 
     private func placeholder(_ text: String) -> some View {
