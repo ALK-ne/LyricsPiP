@@ -107,10 +107,21 @@ struct ContentView: View {
 
     private var loggedInView: some View {
         VStack(spacing: 16) {
-            Text(Self.versionString)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .trailing)
+            HStack {
+                Button {
+                    OrientationManager.shared.enterLandscape()
+                } label: {
+                    Image(systemName: "rectangle.landscape.rotate")
+                        .font(.title3)
+                }
+                .accessibilityLabel("横画面で歌詞表示")
+
+                Spacer()
+
+                Text(Self.versionString)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
 
             trackHeader
 

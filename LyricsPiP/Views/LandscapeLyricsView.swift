@@ -19,6 +19,17 @@ struct LandscapeLyricsView: View {
                 .padding(.horizontal, 28)
                 .padding(.vertical, 20)
         }
+        .overlay(alignment: .topLeading) {
+            Button {
+                OrientationManager.shared.enterPortrait()
+            } label: {
+                Image(systemName: "rectangle.portrait.rotate")
+                    .font(.title2)
+                    .foregroundStyle(.white.opacity(0.7))
+                    .padding(16)
+            }
+            .accessibilityLabel("縦画面に戻る")
+        }
     }
 
     @ViewBuilder
