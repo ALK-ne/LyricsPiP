@@ -23,9 +23,10 @@ struct LandscapeLyricsView: View {
             Button {
                 OrientationManager.shared.enterPortrait()
             } label: {
+                // No explicit color: use the default accent (blue), so it
+                // matches the landscape button on the portrait screen.
                 Image(systemName: "rectangle.portrait.rotate")
                     .font(.title2)
-                    .foregroundStyle(.white.opacity(0.7))
                     .padding(16)
             }
             .accessibilityLabel("縦画面に戻る")
