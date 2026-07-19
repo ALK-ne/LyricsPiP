@@ -8,7 +8,7 @@
 - **機能追加** → マイナーを上げる(1.0 → 1.1 → 1.2 …)。
 - **バグ修正・細かい調整** → パッチを上げる(1.0 → 1.0.1 → 1.0.2 …)。
 - アプリ内の表示はマーケティング版のみ(例 `v1.0`)。CI実行番号(CFBundleVersion)は表示しない。
-- バージョンを上げる操作: `LyricsPiP/App/Info.plist` の `CFBundleShortVersionString` を書き換える。リリースのたびに本ファイルへ該当バージョンの要約を追記する。
+- バージョンを上げる操作: `project.yml` の `info.properties.CFBundleShortVersionString` を書き換える(CIがInfo.plistをここから再生成するため。Info.plistファイル単体を直しても効かない)。リリースのたびに本ファイルへ該当バージョンの要約を追記する。
 
 ---
 

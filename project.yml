@@ -30,6 +30,7 @@ targets:
       path: LyricsPiP/App/Info.plist
       properties:
         CFBundleDisplayName: LyricsPiP
+        CFBundleShortVersionString: "1.2"
         UILaunchScreen: {}
         UIBackgroundModes:
           - audio
