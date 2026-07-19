@@ -9,6 +9,11 @@ struct ContentView: View {
     @State private var showingLogin = false
     @State private var showingSettings = false
 
+    // On iPhone this is .compact in landscape and .regular in portrait, so it
+    // doubles as a reliable "is the app in landscape?" signal (foreground only,
+    // which is exactly when this in-app view is shown).
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+
     /// Marketing version only (CFBundleShortVersionString), e.g. "v1.0".
     /// The CI build number (CFBundleVersion) is intentionally not shown.
     private static var versionString: String {
@@ -18,6 +23,38 @@ struct ContentView: View {
     }
 
     var body: some View {
+        Group {
+            if verticalSizeClass == .compact {
+                // Landscape: full-screen in-app lyrics, mirroring the PiP
+                // content and the same display settings.
+                LandscapeLyricsView(
+                    hasTrack: watcher.currentTrack != nil,
+                    lines: syncEngine.lines,
+                    activeIndex: syncEngine.activeIndex,
+                    noLyricsFound: syncEngine.noLyricsFound,
+                    settings: .shared
+                )
+            } else {
+                portraitBody
+            }
+        }
+        .onAppear {
+            pipController.attach(syncEngine: syncEngine)
+        }
+        // The display layer must stay in the rendered view hierarchy for
+        // AVPictureInPictureController.isPictureInPicturePossible to become
+        // true. Attached at this outer level (not inside portraitBody) so it
+        // stays mounted across portrait/landscape switches -- PiP is a
+        // background feature and must survive the in-app landscape view.
+        .background(
+            PiPHostView(controller: pipController)
+                .frame(width: 48, height: 16)
+                .opacity(0.02)
+                .allowsHitTesting(false)
+        )
+    }
+
+    private var portraitBody: some View {
         NavigationStack {
             VStack(spacing: 16) {
                 if !sessionClient.isLoggedIn {
@@ -46,20 +83,6 @@ struct ContentView: View {
             .sheet(isPresented: $showingSettings) {
                 LyricsSettingsView(settings: .shared)
             }
-            .onAppear {
-                pipController.attach(syncEngine: syncEngine)
-            }
-            // The display layer must stay in the rendered view hierarchy for
-            // AVPictureInPictureController.isPictureInPicturePossible to become
-            // true, but there's no visible PiP control anymore -- PiP starts/
-            // stops automatically as the app backgrounds/foregrounds. Keep it
-            // as a tiny, near-invisible layer with no layout footprint.
-            .background(
-                PiPHostView(controller: pipController)
-                    .frame(width: 48, height: 16)
-                    .opacity(0.02)
-                    .allowsHitTesting(false)
-            )
         }
     }
 

@@ -5,12 +5,6 @@ import CoreMedia
 /// Renders the current + next lyric line into a pixel buffer suitable for
 /// enqueueing onto an `AVSampleBufferDisplayLayer` for custom-content PIP.
 enum LyricsFrameRenderer {
-    /// One line to draw, plus whether it's the current (highlighted) line.
-    struct Line: Equatable {
-        let text: String
-        let isCurrent: Bool
-    }
-
     // Fixed width; the height grows with the number of lines (see frameSize).
     static let width: CGFloat = 720
 
@@ -36,7 +30,7 @@ enum LyricsFrameRenderer {
 
     /// Renders `lines` stacked top-to-bottom into `frameSize`. The current line
     /// is highlighted (bold/white/large); the rest are dimmed and smaller.
-    static func renderImage(lines: [Line], frameSize: CGSize) -> CGImage? {
+    static func renderImage(lines: [DisplayLyricLine], frameSize: CGSize) -> CGImage? {
         let renderer = UIGraphicsImageRenderer(size: frameSize)
         let image = renderer.image { _ in
             UIColor.black.setFill()

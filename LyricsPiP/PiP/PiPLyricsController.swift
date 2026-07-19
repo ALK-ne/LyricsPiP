@@ -26,7 +26,7 @@ final class PiPLyricsController: NSObject, ObservableObject {
     private var cancellables = Set<AnyCancellable>()
 
     private let settings = LyricsDisplaySettings.shared
-    private var latestDisplayLines: [LyricsFrameRenderer.Line] = []
+    private var latestDisplayLines: [DisplayLyricLine] = []
     private var latestFrameSize: CGSize = .zero
     private var latestLines: [LyricLine] = []
     private var latestActiveIndex: Int?
@@ -199,7 +199,12 @@ final class PiPLyricsController: NSObject, ObservableObject {
     }
 
     private func updateFrame(activeIndex: Int?, lines: [LyricLine]) {
-        let displayLines = Self.buildDisplayLines(activeIndex: activeIndex, lines: lines, settings: settings)
+        let displayLines = LyricsLineWindow.build(
+            activeIndex: activeIndex,
+            lines: lines,
+            showPreviousLine: settings.showPreviousLine,
+            nextLinesCount: settings.nextLinesCount
+        )
         let frameSize = LyricsFrameRenderer.frameSize(lineCount: displayLines.count)
 
         guard !hasEnqueuedFrame || displayLines != latestDisplayLines || frameSize != latestFrameSize else { return }
@@ -230,34 +235,6 @@ final class PiPLyricsController: NSObject, ObservableObject {
         hasEnqueuedFrame = true
         // Deliberately not logged: fires on every lyric line change (every
         // few seconds while a track plays) and quickly floods the log.
-    }
-
-    /// Builds the ordered list of lines to render around `activeIndex`, honoring
-    /// the user's display settings: optional previous line (③), the current
-    /// line, then `nextLinesCount` upcoming lines (②). Out-of-range positions
-    /// (song start/end) become empty slots so the layout/height stays stable.
-    private static func buildDisplayLines(
-        activeIndex: Int?,
-        lines: [LyricLine],
-        settings: LyricsDisplaySettings
-    ) -> [LyricsFrameRenderer.Line] {
-        func text(at index: Int?) -> String {
-            guard let index, lines.indices.contains(index) else { return "" }
-            return lines[index].text
-        }
-
-        var result: [LyricsFrameRenderer.Line] = []
-        if settings.showPreviousLine {
-            result.append(.init(text: text(at: activeIndex.map { $0 - 1 }), isCurrent: false))
-        }
-        result.append(.init(text: text(at: activeIndex), isCurrent: true))
-        let nextCount = min(LyricsDisplaySettings.maxNextLines, max(0, settings.nextLinesCount))
-        if nextCount >= 1 {
-            for offset in 1...nextCount {
-                result.append(.init(text: text(at: activeIndex.map { $0 + offset }), isCurrent: false))
-            }
-        }
-        return result
     }
 }
 
