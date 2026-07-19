@@ -29,6 +29,8 @@ struct ContentView: View {
                 // content and the same display settings.
                 LandscapeLyricsView(
                     hasTrack: watcher.currentTrack != nil,
+                    trackName: watcher.currentTrack?.name,
+                    trackArtist: watcher.currentTrack?.artist,
                     lines: syncEngine.lines,
                     activeIndex: syncEngine.activeIndex,
                     noLyricsFound: syncEngine.noLyricsFound,

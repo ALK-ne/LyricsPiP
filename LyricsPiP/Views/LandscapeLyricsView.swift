@@ -7,6 +7,8 @@ import LyricsPiPCore
 /// It mirrors the PiP content and honors the same display settings.
 struct LandscapeLyricsView: View {
     let hasTrack: Bool
+    let trackName: String?
+    let trackArtist: String?
     let lines: [LyricLine]
     let activeIndex: Int?
     let noLyricsFound: Bool
@@ -15,9 +17,15 @@ struct LandscapeLyricsView: View {
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            content
-                .padding(.horizontal, 28)
-                .padding(.vertical, 20)
+            VStack(spacing: 0) {
+                if hasTrack {
+                    header
+                }
+                content
+                    .frame(maxHeight: .infinity)
+            }
+            .padding(.horizontal, 28)
+            .padding(.vertical, 20)
         }
         .overlay(alignment: .topLeading) {
             Button {
@@ -31,6 +39,24 @@ struct LandscapeLyricsView: View {
             }
             .accessibilityLabel("縦画面に戻る")
         }
+    }
+
+    /// Song title + artist at the top, matching the portrait screen's header
+    /// but styled for the black full-screen background.
+    private var header: some View {
+        VStack(spacing: 2) {
+            Text(trackName ?? "")
+                .font(.headline)
+                .foregroundStyle(.white)
+            Text(trackArtist ?? "")
+                .font(.subheadline)
+                .foregroundStyle(.white.opacity(0.6))
+        }
+        .lineLimit(1)
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity)
+        // Keep clear of the top-leading back button.
+        .padding(.horizontal, 44)
     }
 
     @ViewBuilder
