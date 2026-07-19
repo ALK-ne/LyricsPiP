@@ -5,12 +5,38 @@ import CoreMedia
 /// Renders the current + next lyric line into a pixel buffer suitable for
 /// enqueueing onto an `AVSampleBufferDisplayLayer` for custom-content PIP.
 enum LyricsFrameRenderer {
-    // 3.6:1 (wider/shorter than before) with tightened text rects, so the
-    // PiP window follows this ratio and the two lyric lines fill nearly all
-    // of its height instead of leaving a visible black band above/below.
-    static let frameSize = CGSize(width: 720, height: 200)
+    /// One line to draw, plus whether it's the current (highlighted) line.
+    struct Line: Equatable {
+        let text: String
+        let isCurrent: Bool
+    }
 
-    static func renderImage(currentLine: String?, nextLine: String?) -> CGImage? {
+    // Fixed width; the height grows with the number of lines (see frameSize).
+    static let width: CGFloat = 720
+
+    // Layout metrics. The current line gets a taller slot (bold, big font);
+    // other lines a shorter one. Chosen so a 2-line frame (current + 1 next)
+    // stays exactly 720x200 (3.6:1) — the ratio verified good on device —
+    // while extra lines simply extend the height:
+    //   topPad(8) + current(104) + (other(74)+gap(4))*(n-1) + bottomPad(10)
+    private static let topPadding: CGFloat = 8
+    private static let bottomPadding: CGFloat = 10
+    private static let lineGap: CGFloat = 4
+    private static let currentSlotHeight: CGFloat = 104
+    private static let otherSlotHeight: CGFloat = 74
+
+    /// Pixel size for a frame showing `lineCount` lines. The PiP window follows
+    /// this aspect ratio, so more lines makes the floating window taller.
+    static func frameSize(lineCount: Int) -> CGSize {
+        let count = max(1, lineCount)
+        let others = CGFloat(count - 1)
+        let height = topPadding + currentSlotHeight + others * (otherSlotHeight + lineGap) + bottomPadding
+        return CGSize(width: width, height: height)
+    }
+
+    /// Renders `lines` stacked top-to-bottom into `frameSize`. The current line
+    /// is highlighted (bold/white/large); the rest are dimmed and smaller.
+    static func renderImage(lines: [Line], frameSize: CGSize) -> CGImage? {
         let renderer = UIGraphicsImageRenderer(size: frameSize)
         let image = renderer.image { _ in
             UIColor.black.setFill()
@@ -20,27 +46,33 @@ enum LyricsFrameRenderer {
             paragraph.alignment = .center
 
             let w = frameSize.width - 40
-            let currentRect = CGRect(x: 20, y: 8, width: w, height: 104)
-            let nextRect = CGRect(x: 20, y: 116, width: w, height: 74)
-
-            drawFittedLine(
-                currentLine ?? "♪",
-                in: currentRect,
-                maxFontSize: 44,
-                minFontSize: 16,
-                weight: .bold,
-                color: .white,
-                paragraphStyle: paragraph
-            )
-            drawFittedLine(
-                nextLine ?? "",
-                in: nextRect,
-                maxFontSize: 30,
-                minFontSize: 14,
-                weight: .regular,
-                color: UIColor(white: 1, alpha: 0.55),
-                paragraphStyle: paragraph
-            )
+            var y = topPadding
+            for line in lines {
+                let slot = line.isCurrent ? currentSlotHeight : otherSlotHeight
+                let rect = CGRect(x: 20, y: y, width: w, height: slot)
+                if line.isCurrent {
+                    drawFittedLine(
+                        line.text.isEmpty ? "♪" : line.text,
+                        in: rect,
+                        maxFontSize: 44,
+                        minFontSize: 16,
+                        weight: .bold,
+                        color: .white,
+                        paragraphStyle: paragraph
+                    )
+                } else {
+                    drawFittedLine(
+                        line.text,
+                        in: rect,
+                        maxFontSize: 30,
+                        minFontSize: 14,
+                        weight: .regular,
+                        color: UIColor(white: 1, alpha: 0.55),
+                        paragraphStyle: paragraph
+                    )
+                }
+                y += slot + lineGap
+            }
         }
         return image.cgImage
     }

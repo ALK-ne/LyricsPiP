@@ -7,6 +7,7 @@ struct ContentView: View {
     @StateObject private var pipController = PiPLyricsController()
 
     @State private var showingLogin = false
+    @State private var showingSettings = false
 
     /// Marketing version only (CFBundleShortVersionString), e.g. "v1.0".
     /// The CI build number (CFBundleVersion) is intentionally not shown.
@@ -27,10 +28,23 @@ struct ContentView: View {
             }
             .padding()
             .navigationTitle("LyricsPiP")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showingSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                    .accessibilityLabel("設定")
+                }
+            }
             .sheet(isPresented: $showingLogin) {
                 SpotifyLoginSheet { cookie in
                     sessionClient.saveSpDcCookie(cookie)
                 }
+            }
+            .sheet(isPresented: $showingSettings) {
+                LyricsSettingsView(settings: .shared)
             }
             .onAppear {
                 pipController.attach(syncEngine: syncEngine)

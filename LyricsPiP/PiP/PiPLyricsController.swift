@@ -25,8 +25,9 @@ final class PiPLyricsController: NSObject, ObservableObject {
     private var silencePlayer: AVAudioPlayer?
     private var cancellables = Set<AnyCancellable>()
 
-    private var latestCurrentText: String?
-    private var latestNextText: String?
+    private let settings = LyricsDisplaySettings.shared
+    private var latestDisplayLines: [LyricsFrameRenderer.Line] = []
+    private var latestFrameSize: CGSize = .zero
     private var latestLines: [LyricLine] = []
     private var latestActiveIndex: Int?
     // The display layer needs at least one enqueued frame before PiP can start;
@@ -68,6 +69,20 @@ final class PiPLyricsController: NSObject, ObservableObject {
                 self.pipController?.stopPictureInPicture()
             }
         }
+
+        // Re-render the PiP frame whenever the user changes the display
+        // settings (line count / previous-line toggle). objectWillChange fires
+        // in willSet, before the new value is committed; hopping through a
+        // MainActor Task defers the redraw until after the value has updated,
+        // so we read the new setting, not the old one.
+        settings.objectWillChange
+            .sink { [weak self] in
+                Task { @MainActor in
+                    guard let self else { return }
+                    self.updateFrame(activeIndex: self.latestActiveIndex, lines: self.latestLines)
+                }
+            }
+            .store(in: &cancellables)
     }
 
     func attach(syncEngine: LyricsSyncEngine) {
@@ -184,19 +199,18 @@ final class PiPLyricsController: NSObject, ObservableObject {
     }
 
     private func updateFrame(activeIndex: Int?, lines: [LyricLine]) {
-        let currentText = activeIndex.flatMap { lines.indices.contains($0) ? lines[$0].text : nil }
-        let nextIndex = activeIndex.map { $0 + 1 }
-        let nextText = nextIndex.flatMap { lines.indices.contains($0) ? lines[$0].text : nil }
+        let displayLines = Self.buildDisplayLines(activeIndex: activeIndex, lines: lines, settings: settings)
+        let frameSize = LyricsFrameRenderer.frameSize(lineCount: displayLines.count)
 
-        guard !hasEnqueuedFrame || currentText != latestCurrentText || nextText != latestNextText else { return }
-        latestCurrentText = currentText
-        latestNextText = nextText
+        guard !hasEnqueuedFrame || displayLines != latestDisplayLines || frameSize != latestFrameSize else { return }
+        latestDisplayLines = displayLines
+        latestFrameSize = frameSize
 
         guard let displayLayer else {
             logger.log("[PiP] フレーム更新スキップ: displayLayerがまだ無い")
             return
         }
-        guard let cgImage = LyricsFrameRenderer.renderImage(currentLine: currentText, nextLine: nextText) else {
+        guard let cgImage = LyricsFrameRenderer.renderImage(lines: displayLines, frameSize: frameSize) else {
             logger.log("[PiP] フレーム描画失敗")
             return
         }
@@ -216,6 +230,34 @@ final class PiPLyricsController: NSObject, ObservableObject {
         hasEnqueuedFrame = true
         // Deliberately not logged: fires on every lyric line change (every
         // few seconds while a track plays) and quickly floods the log.
+    }
+
+    /// Builds the ordered list of lines to render around `activeIndex`, honoring
+    /// the user's display settings: optional previous line (③), the current
+    /// line, then `nextLinesCount` upcoming lines (②). Out-of-range positions
+    /// (song start/end) become empty slots so the layout/height stays stable.
+    private static func buildDisplayLines(
+        activeIndex: Int?,
+        lines: [LyricLine],
+        settings: LyricsDisplaySettings
+    ) -> [LyricsFrameRenderer.Line] {
+        func text(at index: Int?) -> String {
+            guard let index, lines.indices.contains(index) else { return "" }
+            return lines[index].text
+        }
+
+        var result: [LyricsFrameRenderer.Line] = []
+        if settings.showPreviousLine {
+            result.append(.init(text: text(at: activeIndex.map { $0 - 1 }), isCurrent: false))
+        }
+        result.append(.init(text: text(at: activeIndex), isCurrent: true))
+        let nextCount = min(LyricsDisplaySettings.maxNextLines, max(0, settings.nextLinesCount))
+        if nextCount >= 1 {
+            for offset in 1...nextCount {
+                result.append(.init(text: text(at: activeIndex.map { $0 + offset }), isCurrent: false))
+            }
+        }
+        return result
     }
 }
 
