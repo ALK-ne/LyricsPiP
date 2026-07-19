@@ -21,7 +21,10 @@ struct LandscapeLyricsView: View {
     @ObservedObject var settings: LyricsDisplaySettings
 
     private let minFontSize: CGFloat = 22
-    private let maxFontSize: CGFloat = 80
+    // Capped well below the point where a big font would overflow the landscape
+    // width and wrap a single lyric line onto two rows. Longer lines shrink to
+    // fit one row (lineLimit(1) + minimumScaleFactor) rather than wrapping.
+    private let maxFontSize: CGFloat = 54
 
     var body: some View {
         ZStack {
@@ -97,7 +100,10 @@ struct LandscapeLyricsView: View {
                                               weight: index == activeIndex ? .bold : .regular))
                                 .foregroundStyle(index == activeIndex ? Color.white : Color.white.opacity(0.45))
                                 .multilineTextAlignment(.center)
-                                .minimumScaleFactor(0.4)
+                                // One row per lyric line: a long line shrinks to
+                                // fit the width instead of wrapping onto 2 rows.
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.35)
                                 .frame(maxWidth: .infinity)
                                 .animation(.easeInOut(duration: 0.25), value: activeIndex)
                                 .id(index)
