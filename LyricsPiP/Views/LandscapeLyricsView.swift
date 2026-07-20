@@ -90,59 +90,40 @@ struct LandscapeLyricsView: View {
     }
 
     /// The whole lyric sheet as a vertical scroll list, current line centered,
-    /// flowing upward as the song advances. Font size is derived from ②③.
+    /// flowing upward as the song advances. See `visibleLineCount` for ②③.
     private var scrollingLyrics: some View {
         GeometryReader { geo in
             let vis = visibleLineCount
-            // Fit exactly `vis` lines by making the line pitch = height / vis.
-            // The font is capped for width, so when few lines are wanted the
-            // leftover pitch becomes a large gap (rather than an oversized font).
+            // Each line gets a fixed slot of exactly height/vis, so `vis` slots
+            // fill the height exactly — no line is ever half-clipped at an edge.
             let pitch = geo.size.height / CGFloat(vis)
-            let font = min(maxFontSize, pitch * 0.7)
-            let spacing = max(2, pitch - font * 1.2)
-            // ③ OFF → current is the top visible line (previous scrolls off).
-            // ③ ON  → current is the 2nd line (one previous line above it).
-            let anchor = UnitPoint(x: 0.5, y: (settings.showPreviousLine ? 1.5 : 0.5) / CGFloat(vis))
-            ScrollViewReader { proxy in
-                ScrollView(.vertical, showsIndicators: false) {
-                    LazyVStack(spacing: spacing) {
-                        ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
-                            Text(line.text.isEmpty ? "♪" : line.text)
-                                .font(.system(size: index == activeIndex ? font * 1.08 : font,
-                                              weight: index == activeIndex ? .bold : .regular))
-                                .foregroundStyle(index == activeIndex ? Color.white : Color.white.opacity(0.45))
-                                .multilineTextAlignment(.center)
-                                // One row per lyric line: a long line shrinks to
-                                // fit the width instead of wrapping onto 2 rows.
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.35)
-                                .frame(maxWidth: .infinity)
-                                .animation(.easeInOut(duration: 0.25), value: activeIndex)
-                                .id(index)
-                        }
-                    }
-                    // Enough room so any line (incl. first/last) can reach the
-                    // target anchor position.
-                    .padding(.vertical, geo.size.height)
-                }
-                .onChange(of: activeIndex) { _, newValue in
-                    guard let newValue else { return }
-                    withAnimation(.easeInOut(duration: 0.35)) {
-                        proxy.scrollTo(newValue, anchor: anchor)
-                    }
-                }
-                .onChange(of: pitch) { _, _ in
-                    // Layout changed via ②③ / rotation: re-place the current line.
-                    guard let activeIndex else { return }
-                    withAnimation(.easeInOut(duration: 0.25)) {
-                        proxy.scrollTo(activeIndex, anchor: anchor)
-                    }
-                }
-                .onAppear {
-                    guard let activeIndex else { return }
-                    proxy.scrollTo(activeIndex, anchor: anchor)
+            let font = min(maxFontSize, pitch * 0.66)
+            // ③ OFF → current occupies the top slot; ③ ON → the 2nd slot (one
+            // previous line visible above it).
+            let currentSlot = settings.showPreviousLine ? 1 : 0
+            // Slide the whole strip so the current line lands on `currentSlot`.
+            let offsetY = CGFloat(currentSlot - (activeIndex ?? 0)) * pitch
+            VStack(spacing: 0) {
+                ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
+                    Text(line.text.isEmpty ? "♪" : line.text)
+                        .font(.system(size: index == activeIndex ? font * 1.06 : font,
+                                      weight: index == activeIndex ? .bold : .regular))
+                        .foregroundStyle(index == activeIndex ? Color.white : Color.white.opacity(0.45))
+                        .multilineTextAlignment(.center)
+                        // One row per lyric: a long line shrinks to fit the width.
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.35)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: pitch)
                 }
             }
+            .frame(width: geo.size.width, alignment: .top)
+            .offset(y: offsetY)
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
+            .clipped()
+            // Advancing a line slides the strip up by one slot: reads as an
+            // upward scroll while keeping exactly `vis` full lines on screen.
+            .animation(.easeInOut(duration: 0.35), value: activeIndex)
         }
     }
 
