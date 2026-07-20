@@ -94,37 +94,66 @@ struct LandscapeLyricsView: View {
     private var scrollingLyrics: some View {
         GeometryReader { geo in
             let vis = visibleLineCount
-            // Each line gets a fixed slot of exactly height/vis, so `vis` slots
-            // fill the height exactly — no line is ever half-clipped at an edge.
             let pitch = geo.size.height / CGFloat(vis)
-            let font = min(maxFontSize, pitch * 0.66)
-            // ③ OFF → current occupies the top slot; ③ ON → the 2nd slot (one
-            // previous line visible above it).
-            let currentSlot = settings.showPreviousLine ? 1 : 0
-            // Slide the whole strip so the current line lands on `currentSlot`.
-            let offsetY = CGFloat(currentSlot - (activeIndex ?? 0)) * pitch
-            VStack(spacing: 0) {
-                ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
-                    Text(line.text.isEmpty ? "♪" : line.text)
-                        .font(.system(size: index == activeIndex ? font * 1.06 : font,
-                                      weight: index == activeIndex ? .bold : .regular))
-                        .foregroundStyle(index == activeIndex ? Color.white : Color.white.opacity(0.45))
-                        .multilineTextAlignment(.center)
-                        // One row per lyric: a long line shrinks to fit the width.
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.35)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: pitch)
+            let font = min(maxFontSize, pitch * 0.7)
+            let spacing = max(2, pitch - font * 1.2)
+            // ③ OFF → current sits near the top; ③ ON → lower, with previous
+            // lines dimmed above it. Continuous smooth scroll; the top/bottom
+            // edges fade to black (edgeFadeMask) so lines entering/leaving the
+            // screen dissolve instead of hard-clipping.
+            let anchor = UnitPoint(x: 0.5, y: (settings.showPreviousLine ? 1.5 : 0.5) / CGFloat(vis))
+            ScrollViewReader { proxy in
+                ScrollView(.vertical, showsIndicators: false) {
+                    LazyVStack(spacing: spacing) {
+                        ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
+                            Text(line.text.isEmpty ? "♪" : line.text)
+                                .font(.system(size: index == activeIndex ? font * 1.08 : font,
+                                              weight: index == activeIndex ? .bold : .regular))
+                                .foregroundStyle(index == activeIndex ? Color.white : Color.white.opacity(0.4))
+                                .multilineTextAlignment(.center)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.35)
+                                .frame(maxWidth: .infinity)
+                                .animation(.easeInOut(duration: 0.25), value: activeIndex)
+                                .id(index)
+                        }
+                    }
+                    .padding(.vertical, geo.size.height)
+                }
+                .mask(edgeFadeMask)
+                .onChange(of: activeIndex) { _, newValue in
+                    guard let newValue else { return }
+                    withAnimation(.easeInOut(duration: 0.4)) {
+                        proxy.scrollTo(newValue, anchor: anchor)
+                    }
+                }
+                .onChange(of: pitch) { _, _ in
+                    guard let activeIndex else { return }
+                    proxy.scrollTo(activeIndex, anchor: anchor)
+                }
+                .onAppear {
+                    guard let activeIndex else { return }
+                    proxy.scrollTo(activeIndex, anchor: anchor)
                 }
             }
-            .frame(width: geo.size.width, alignment: .top)
-            .offset(y: offsetY)
-            .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
-            .clipped()
-            // Advancing a line slides the strip up by one slot: reads as an
-            // upward scroll while keeping exactly `vis` full lines on screen.
-            .animation(.easeInOut(duration: 0.35), value: activeIndex)
         }
+    }
+
+    /// Fades the very top and bottom edges to transparent so lines scrolling in
+    /// and out dissolve smoothly. The clear top stop stays above where the
+    /// current line ever sits (③ OFF puts it highest, at 0.5/vis) so the active
+    /// line itself is never faded.
+    private var edgeFadeMask: some View {
+        LinearGradient(
+            stops: [
+                .init(color: .clear, location: 0.0),
+                .init(color: .black, location: 0.05),
+                .init(color: .black, location: 0.85),
+                .init(color: .clear, location: 1.0)
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
     }
 
     /// How many lyric lines to fit on screen, straight from ②③:
